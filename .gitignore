@@ -1,0 +1,61 @@
+# ====================================================================
+# Go Build Artifacts & Binaries
+# ====================================================================
+/node_monitor
+/node_monitor.exe
+*.test
+*.prof
+coverage.out
+coverage.html
+artifacts/
+
+# ====================================================================
+# Database files
+# ====================================================================
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+data/
+
+# ====================================================================
+# Environment & Secrets
+# ====================================================================
+.env
+.env.*
+!.env.example
+*.ini
+
+# ====================================================================
+# Frontend dependencies & build artifacts
+# ====================================================================
+frontend/node_modules/
+frontend/.npm-cache/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.tsbuildinfo
+frontend/.eslintcache
+
+# Node logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# ====================================================================
+# IDE & OS Artifacts
+# ====================================================================
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+*.swp
+*~

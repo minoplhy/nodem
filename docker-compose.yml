@@ -1,0 +1,24 @@
+services:
+  node_monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node_monitor
+    ports:
+      - "8080:8080"
+    environment:
+      - BASE_PATH=/
+    volumes:
+      - ./node_monitor_data:/app/data
+    restart: unless-stopped
+    networks:
+      - monitor_net
+
+networks:
+  monitor_net:
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+        - subnet: fd00:cafe:face::/64
