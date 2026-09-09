@@ -2,7 +2,7 @@ package rules
 
 import (
 	"log/slog"
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 // CheckStateKey identifies a check state by IP ID and Check ID.

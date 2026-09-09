@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 func TestRuleExprJSON(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
-	"node_monitor_go/internal/checkers"
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/providers"
+	"github.com/minoplhy/nodem/internal/checkers"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/providers"
 )
 
 type CreateGroupRequest struct {

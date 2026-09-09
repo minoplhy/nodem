@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/misc"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/misc"
 )
 
 func (r *SqliteRepository) GetProvider(ctx context.Context, tenantID, id int64) (*db.DnsProviderConfig, error) {

@@ -1,8 +1,14 @@
 # ====================================================================
 # Go Build Artifacts & Binaries
 # ====================================================================
+/nodem
+/nodem.exe
 /node_monitor
 /node_monitor.exe
+/ech_agent
+/ech_agent.exe
+/bin/
+bin/
 *.test
 *.prof
 coverage.out
@@ -28,6 +34,7 @@ data/
 .env
 .env.*
 !.env.example
+!.env.agent.example
 *.ini
 
 # ====================================================================
@@ -36,6 +43,7 @@ data/
 frontend/node_modules/
 frontend/.npm-cache/
 frontend/dist/
+!frontend/dist/.gitkeep
 frontend/dist-ssr/
 frontend/*.tsbuildinfo
 frontend/.eslintcache

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/ech/transport"
 )
 
 // AppState contains shared dependencies and runtime configuration.
@@ -13,6 +15,11 @@ type AppState struct {
 	Repo           db.Repository
 	BootstrapToken string
 	BasePath       string
+	PullService    interface {
+		AuthenticateByToken(ctx context.Context, token, callerTransport string) (*db.ECHNode, error)
+		SyncNode(ctx context.Context, node *db.ECHNode, req transport.SyncRequest, callerIP string) (*transport.SyncResponse, error)
+		AckNode(ctx context.Context, node *db.ECHNode, req transport.AckRequest, callerIP string) error
+	}
 }
 
 // RespondJSON writes an HTTP status code and serializes payload as JSON.

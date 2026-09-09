@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 // TelegramNotifier sends alert messages via the Telegram Bot API.

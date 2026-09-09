@@ -1,0 +1,194 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-frontend:
+    name: Build Frontend SPA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Compile Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Upload Frontend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  build-binaries:
+    name: Build Multi-Arch Binaries
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: linux
+            arch: amd64
+            goarm: ""
+          - os: linux
+            arch: arm64
+            goarm: ""
+          - os: linux
+            arch: arm
+            goarm: "7"
+            suffix: "armv7"
+          # macOS builds
+          - os: darwin
+            arch: amd64
+            goarm: ""
+          - os: darwin
+            arch: arm64
+            goarm: ""
+          # FreeBSD builds
+          - os: freebsd
+            arch: amd64
+            goarm: ""
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Frontend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Determine Platform Name
+        id: vars
+        run: |
+          PLATFORM="${{ matrix.os }}-${{ matrix.suffix || matrix.arch }}"
+          VERSION="${{ github.ref_name }}"
+          if [ "${VERSION}" = "" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.tag }}"
+          fi
+          COMMIT="${{ github.sha }}"
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "platform=${PLATFORM}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile nodem (Server)
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          LDFLAGS="-s -w \
+            -X github.com/minoplhy/nodem/internal/version.Version=${{ steps.vars.outputs.version }} \
+            -X github.com/minoplhy/nodem/internal/version.Commit=${{ steps.vars.outputs.commit }} \
+            -X github.com/minoplhy/nodem/internal/version.BuildDate=${{ steps.vars.outputs.build_date }}"
+
+          mkdir -p build_out
+          go build -ldflags="${LDFLAGS}" -o "build_out/nodem-${{ steps.vars.outputs.platform }}" ./cmd/nodem
+
+      - name: Compile ech_agent (Edge Agent)
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          LDFLAGS="-s -w \
+            -X github.com/minoplhy/nodem/internal/version.Version=${{ steps.vars.outputs.version }} \
+            -X github.com/minoplhy/nodem/internal/version.Commit=${{ steps.vars.outputs.commit }} \
+            -X github.com/minoplhy/nodem/internal/version.BuildDate=${{ steps.vars.outputs.build_date }}"
+
+          # Compile both standard names for seamless compatibility
+          go build -ldflags="${LDFLAGS}" -o "build_out/ech_agent-${{ steps.vars.outputs.platform }}" ./cmd/ech_agent
+          go build -ldflags="${LDFLAGS}" -o "build_out/nodem-agent-${{ steps.vars.outputs.platform }}" ./cmd/ech_agent
+
+      - name: Package Archives
+        run: |
+          cd build_out
+          # Create archive for server
+          tar -czvf "nodem-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.platform }}.tar.gz" "nodem-${{ steps.vars.outputs.platform }}"
+          # Create archive for agent
+          tar -czvf "nodem-agent-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.platform }}.tar.gz" "ech_agent-${{ steps.vars.outputs.platform }}" "nodem-agent-${{ steps.vars.outputs.platform }}"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ steps.vars.outputs.platform }}
+          path: build_out/*
+          retention-days: 1
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download All Binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: all_binaries
+          merge-multiple: true
+
+      - name: Generate Checksums
+        run: |
+          cd all_binaries
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Determine Tag
+        id: tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ "${TAG}" = "" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: nodem ${{ steps.tag.outputs.tag }}
+          files: |
+            all_binaries/*
+            install.sh
+            uninstall.sh
+            install-agent.sh
+            uninstall-agent.sh
+          generate_release_notes: true
+          draft: false
+          prerelease: false

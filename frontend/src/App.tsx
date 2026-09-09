@@ -7,12 +7,14 @@ import { Setup } from './pages/Setup';
 import { Dashboard } from './pages/Dashboard';
 import { Providers } from './pages/Providers';
 import { Groups } from './pages/Groups';
+import { ECH } from './pages/ECH';
 import { Notifications } from './pages/Notifications';
 import { Sessions } from './pages/Sessions';
 import {
   DashboardIcon,
   GlobeIcon,
   ServerIcon,
+  KeyIcon,
   BellIcon,
   ShieldIcon,
   LogOutIcon,
@@ -107,6 +109,19 @@ function AuthenticatedLayout({ currentUser, onLogout, clearOpenGroupId }: Authen
             >
               <GlobeIcon size={18} />
               <span>DNS Providers</span>
+            </NavLink>
+          </li>
+          <li>
+            <NavLink
+              to="/ech"
+              className={({ isActive }) => `menu-item ${isActive ? 'active' : ''}`}
+              onClick={() => {
+                clearOpenGroupId();
+                setSidebarOpen(false);
+              }}
+            >
+              <KeyIcon size={18} />
+              <span>ECH Manager</span>
             </NavLink>
           </li>
           <li>
@@ -229,6 +244,7 @@ function MainApp() {
     setCurrentOpenGroupId(null);
     if (tab === 'dashboard') navigate('/');
     else if (tab === 'providers') navigate('/providers');
+    else if (tab === 'ech') navigate('/ech');
     else if (tab === 'groups') navigate('/groups');
     else if (tab === 'notifications') navigate('/notifications');
     else if (tab === 'sessions') navigate('/sessions');
@@ -304,6 +320,7 @@ function MainApp() {
           element={<Dashboard onNavigateToTab={switchTab} onManageGroup={handleManageGroup} />}
         />
         <Route path="/providers" element={<Providers />} />
+        <Route path="/ech" element={<ECH />} />
         <Route
           path="/groups"
           element={

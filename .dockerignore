@@ -1,0 +1,39 @@
+# Git & documentation
+.git
+.github
+*.md
+LICENSE
+
+# Databases & local state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+data/*
+
+# Local binaries & build directories
+/nodem
+/nodem.exe
+/node_monitor
+/node_monitor.exe
+/ech_agent
+/ech_agent.exe
+bin/
+build_out/
+all_binaries/
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.agent.example
+
+# Frontend dependencies and dev files
+frontend/node_modules/
+frontend/.npm-cache/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/.eslintcache

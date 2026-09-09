@@ -124,3 +124,129 @@ type GroupNotification struct {
 	NotifyOnUp   bool  `json:"notify_on_up"`
 	NotifyOnDown bool  `json:"notify_on_down"`
 }
+
+// ECH Transport constants (strictly exclusive per node)
+const (
+	PullTransportHTTPS = "HTTPS"
+	PullTransportSSH   = "SSH"
+)
+
+// ECH Proxy Types
+const (
+	ProxyTypeNginx   = "NGINX"
+	ProxyTypeCaddy   = "CADDY"
+	ProxyTypeHAProxy = "HAPROXY"
+	ProxyTypeHook    = "HOOK"
+)
+
+// ECH Key Statuses
+const (
+	KeyStatusActive   = "ACTIVE"
+	KeyStatusPrevious = "PREVIOUS"
+	KeyStatusArchived = "ARCHIVED"
+)
+
+// ECH Node Sync Statuses
+const (
+	SyncStatusInSync   = "IN_SYNC"
+	SyncStatusOutdated = "OUTDATED"
+	SyncStatusFailed   = "FAILED"
+	SyncStatusPending  = "PENDING"
+)
+
+// ECHCluster represents a public cover name and cryptographic configuration for ECH keys.
+type ECHCluster struct {
+	ID                    int64      `json:"id"`
+	TenantID              int64      `json:"tenant_id"`
+	Name                  string     `json:"name"`
+	PublicName            string     `json:"public_name"`
+	CipherSuite           string     `json:"cipher_suite"`
+	MaxNameLen           int        `json:"max_name_len"`
+	RotationIntervalHours int        `json:"rotation_interval_hours"`
+	LastRotatedAt         *time.Time `json:"last_rotated_at,omitempty"`
+	NextRotationAt        *time.Time `json:"next_rotation_at,omitempty"`
+	AutoRotate            bool       `json:"auto_rotate"`
+	CurrentVersion        int64      `json:"current_version"`
+	SigningPublicKey      string     `json:"signing_public_key"`
+	SigningPrivateKey     string     `json:"-"`
+	CreatedAt             time.Time  `json:"created_at"`
+}
+
+// ECHKey stores active and historical ECH key pairs for a cluster.
+type ECHKey struct {
+	ID            int64     `json:"id"`
+	ClusterID     int64     `json:"cluster_id"`
+	Version       int64     `json:"version"`
+	Status        string    `json:"status"` // "ACTIVE", "PREVIOUS", "ARCHIVED"
+	Base64ECH     string    `json:"base64_ech"`
+	PrivateKeyPEM string    `json:"-"`
+	ECHConfigPEM  string    `json:"ech_config_pem"`
+	FullPEM       string    `json:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ECHNode represents an independent edge reverse proxy host pulling keys from the control plane.
+type ECHNode struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	Name          string             `json:"name"`
+	PullTransport string             `json:"pull_transport"` // "HTTPS" or "SSH"
+	AuthTokenHash string             `json:"-"`
+	SSHPublicKey  *string            `json:"ssh_public_key,omitempty"`
+	ProxyType     string             `json:"proxy_type"` // "NGINX", "CADDY", "HAPROXY", "HOOK"
+	LastSeenAt    *time.Time         `json:"last_seen_at,omitempty"`
+	LastIP        *string            `json:"last_ip,omitempty"`
+	Clusters      []ECHClusterStatus `json:"clusters,omitempty"`
+	CreatedAt     time.Time          `json:"created_at"`
+}
+
+// ECHClusterStatus represents the synchronization status of a specific cluster on an edge node.
+type ECHClusterStatus struct {
+	ClusterID          int64      `json:"cluster_id"`
+	ClusterName        string     `json:"cluster_name"`
+	PublicName         string     `json:"public_name"`
+	LastAppliedVersion int64      `json:"last_applied_version"`
+	SyncStatus         string     `json:"sync_status"` // "IN_SYNC", "OUTDATED", "FAILED", "PENDING"
+	LastError          *string    `json:"last_error,omitempty"`
+	LastSyncedAt       *time.Time `json:"last_synced_at,omitempty"`
+}
+
+// ECHClusterNode represents an edge node assigned to a cluster, viewed from the cluster's perspective.
+type ECHClusterNode struct {
+	ClusterID          int64      `json:"cluster_id"`
+	NodeID             int64      `json:"node_id"`
+	NodeName           string     `json:"node_name"`
+	PullTransport      string     `json:"pull_transport"`
+	ProxyType          string     `json:"proxy_type"`
+	LastAppliedVersion int64      `json:"last_applied_version"`
+	SyncStatus         string     `json:"sync_status"`
+	LastError          *string    `json:"last_error,omitempty"`
+	LastSyncedAt       *time.Time `json:"last_synced_at,omitempty"`
+}
+
+// ECHDomain links a target domain to an ECHCluster and DNS provider for HTTPS record publication.
+type ECHDomain struct {
+	ID            int64      `json:"id"`
+	ClusterID     int64      `json:"cluster_id"`
+	DNSProviderID int64      `json:"dns_provider_id"`
+	TargetGroupID *int64     `json:"target_group_id,omitempty"`
+	Domain        string     `json:"domain"`
+	TTL           int        `json:"ttl"`
+	ALPN          string     `json:"alpn"`
+	IPv4Hint      *string    `json:"ipv4_hint,omitempty"`
+	IPv6Hint      *string    `json:"ipv6_hint,omitempty"`
+	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
+	DNSStatus     string     `json:"dns_status"` // "SYNCED", "PENDING", "FAILED"
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ECHLog stores audit records for ECH lifecycle events.
+type ECHLog struct {
+	ID        int64     `json:"id"`
+	ClusterID int64     `json:"cluster_id"`
+	NodeID    *int64    `json:"node_id,omitempty"`
+	DomainID  *int64    `json:"domain_id,omitempty"`
+	EventType string    `json:"event_type"` // "GENERATE", "SYNC_HTTPS", "SYNC_SSH", "ACK", "DNS_UPDATE", "ERROR"
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}

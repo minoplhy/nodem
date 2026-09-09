@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/minoplhy/nodem/frontend"
+	"github.com/minoplhy/nodem/internal/version"
 )
 
 // BuildRouter constructs the HTTP router containing all API routes and SPA static file serving.
@@ -22,17 +25,58 @@ func BuildRouter(state *AppState) http.Handler {
 
 	// API Routes
 	r.Route("/api", func(api chi.Router) {
+		// Version endpoint
+		api.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+			RespondJSON(w, http.StatusOK, map[string]string{
+				"version":    version.Short(),
+				"full":       version.Full(),
+				"commit":     version.Commit,
+				"build_date": version.BuildDate,
+			})
+		})
+
 		// Public auth routes
 		api.Get("/setup-status", state.SetupStatus)
 		api.Post("/setup", state.Setup)
 		api.Post("/login", state.Login)
 		api.Post("/logout", state.Logout)
 
+		// Agent API routes (authenticated via X-Agent-Token header)
+		api.Post("/v1/agent/ech/sync", state.AgentECHSync)
+		api.Post("/v1/agent/ech/ack", state.AgentECHAck)
+
 		// Protected routes requiring authentication
 		api.Group(func(auth chi.Router) {
 			auth.Use(state.RequireAuth)
 
 			auth.Get("/me", state.Me)
+
+			// ECH Clusters & Management
+			auth.Get("/ech/clusters", state.ListECHClusters)
+			auth.Post("/ech/clusters", state.CreateECHCluster)
+			auth.Get("/ech/clusters/{id}", state.GetECHCluster)
+			auth.Put("/ech/clusters/{id}", state.UpdateECHCluster)
+			auth.Delete("/ech/clusters/{id}", state.DeleteECHCluster)
+			auth.Post("/ech/clusters/{id}/rotate", state.TriggerClusterRotation)
+
+			// ECH Nodes & Cluster Associations
+			auth.Get("/ech/nodes", state.ListAllECHNodes)
+			auth.Post("/ech/nodes", state.CreateIndependentECHNode)
+			auth.Get("/ech/nodes/{id}", state.GetECHNodeDetail)
+			auth.Put("/ech/nodes/{id}", state.UpdateECHNode)
+			auth.Delete("/ech/nodes/{id}", state.DeleteECHNode)
+			auth.Put("/ech/nodes/{id}/clusters", state.SetNodeClusters)
+
+			auth.Get("/ech/clusters/{id}/nodes", state.ListECHNodesForCluster)
+			auth.Post("/ech/clusters/{id}/nodes", state.CreateECHNode)
+			auth.Post("/ech/clusters/{id}/nodes/assign", state.AssignNodeToCluster)
+			auth.Delete("/ech/clusters/{id}/nodes/{node_id}", state.UnassignNodeFromCluster)
+
+			auth.Get("/ech/clusters/{id}/domains", state.ListECHDomains)
+			auth.Post("/ech/clusters/{id}/domains", state.CreateECHDomain)
+			auth.Delete("/ech/domains/{id}", state.DeleteECHDomain)
+
+			auth.Get("/ech/clusters/{id}/logs", state.ListECHLogs)
 
 			// Providers CRUD
 			auth.Get("/providers", state.ListProviders)
@@ -163,11 +207,35 @@ func BuildRouter(state *AppState) http.Handler {
 		// 4. Static icons and favicons on outer router
 		outer.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "image/svg+xml")
-			http.ServeFile(w, r, filepath.Join(frontendDir, "favicon.svg"))
+			if _, err := os.Stat(filepath.Join(frontendDir, "favicon.svg")); err == nil {
+				http.ServeFile(w, r, filepath.Join(frontendDir, "favicon.svg"))
+				return
+			}
+			if frontend.HasEmbedded() {
+				if distFS, err := frontend.Dist(); err == nil {
+					if data, err := fs.ReadFile(distFS, "favicon.svg"); err == nil {
+						_, _ = w.Write(data)
+						return
+					}
+				}
+			}
+			http.NotFound(w, r)
 		})
 		outer.Get("/icons.svg", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "image/svg+xml")
-			http.ServeFile(w, r, filepath.Join(frontendDir, "icons.svg"))
+			if _, err := os.Stat(filepath.Join(frontendDir, "icons.svg")); err == nil {
+				http.ServeFile(w, r, filepath.Join(frontendDir, "icons.svg"))
+				return
+			}
+			if frontend.HasEmbedded() {
+				if distFS, err := frontend.Dist(); err == nil {
+					if data, err := fs.ReadFile(distFS, "icons.svg"); err == nil {
+						_, _ = w.Write(data)
+						return
+					}
+				}
+			}
+			http.NotFound(w, r)
 		})
 
 		// 5. Redirect root / -> /monitor/
@@ -220,20 +288,7 @@ func serveAssetHandler(assetsDir string) http.HandlerFunc {
 			return
 		}
 
-		filePath := filepath.Join(assetsDir, cleanFile)
-		cleanAssetsDir := filepath.Clean(assetsDir)
-		if !strings.HasPrefix(filepath.Clean(filePath), cleanAssetsDir) {
-			http.NotFound(w, r)
-			return
-		}
-
-		info, err := os.Stat(filePath)
-		if err != nil || info.IsDir() {
-			http.NotFound(w, r)
-			return
-		}
-
-		ext := strings.ToLower(filepath.Ext(filePath))
+		ext := strings.ToLower(filepath.Ext(cleanFile))
 		ctype := mime.TypeByExtension(ext)
 		if ctype == "" {
 			switch ext {
@@ -256,9 +311,32 @@ func serveAssetHandler(assetsDir string) http.HandlerFunc {
 			}
 		}
 
-		w.Header().Set("Content-Type", ctype)
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		http.ServeFile(w, r, filePath)
+		// 1. Try local disk
+		filePath := filepath.Join(assetsDir, cleanFile)
+		cleanAssetsDir := filepath.Clean(assetsDir)
+		if strings.HasPrefix(filepath.Clean(filePath), cleanAssetsDir) {
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				w.Header().Set("Content-Type", ctype)
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				http.ServeFile(w, r, filePath)
+				return
+			}
+		}
+
+		// 2. Try embedded frontend
+		if frontend.HasEmbedded() {
+			if distFS, err := frontend.Dist(); err == nil {
+				assetPath := strings.TrimPrefix(filepath.Clean("assets/"+cleanFile), "/")
+				if data, err := fs.ReadFile(distFS, assetPath); err == nil {
+					w.Header().Set("Content-Type", ctype)
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					_, _ = w.Write(data)
+					return
+				}
+			}
+		}
+
+		http.NotFound(w, r)
 	}
 }
 
@@ -294,14 +372,41 @@ func serveIndexHandler(state *AppState, frontendDir string) http.HandlerFunc {
 					return
 				}
 			}
+
+			// Try embedded fallback for static files
+			if frontend.HasEmbedded() {
+				if distFS, err := frontend.Dist(); err == nil {
+					relPath := strings.TrimPrefix(cleanReqPath, "/")
+					if data, err := fs.ReadFile(distFS, relPath); err == nil {
+						ext := strings.ToLower(filepath.Ext(relPath))
+						ctype := mime.TypeByExtension(ext)
+						if ctype != "" {
+							w.Header().Set("Content-Type", ctype)
+						}
+						_, _ = w.Write(data)
+						return
+					}
+				}
+			}
 		}
 
-		indexPath := filepath.Join(frontendDir, "index.html")
-		htmlBytes, err := os.ReadFile(indexPath)
-		if err != nil {
+		var htmlBytes []byte
+		var err error
+
+		if info, statErr := os.Stat(filepath.Join(frontendDir, "index.html")); statErr == nil && !info.IsDir() {
+			htmlBytes, err = os.ReadFile(filepath.Join(frontendDir, "index.html"))
+		}
+
+		if (err != nil || len(htmlBytes) == 0) && frontend.HasEmbedded() {
+			if distFS, subErr := frontend.Dist(); subErr == nil {
+				htmlBytes, err = fs.ReadFile(distFS, "index.html")
+			}
+		}
+
+		if err != nil || len(htmlBytes) == 0 {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
-			_, _ = fmt.Fprintf(w, "<html><body>index.html not found: %v</body></html>", err)
+			_, _ = fmt.Fprintf(w, "<html><body>index.html not found</body></html>")
 			return
 		}
 

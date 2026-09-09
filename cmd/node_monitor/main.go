@@ -13,12 +13,13 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
-	"node_monitor_go/internal/api"
-	"node_monitor_go/internal/cli"
-	"node_monitor_go/internal/daemon"
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/db/sqlite"
-	"node_monitor_go/internal/misc"
+	"github.com/minoplhy/nodem/internal/api"
+	"github.com/minoplhy/nodem/internal/cli"
+	"github.com/minoplhy/nodem/internal/daemon"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/db/sqlite"
+	"github.com/minoplhy/nodem/internal/misc"
+	"github.com/minoplhy/nodem/internal/version"
 )
 
 func main() {
@@ -54,7 +55,7 @@ func main() {
 		return repo, nil
 	}
 
-	runDaemon := func(port uint16) error {
+	runDaemon := func(port uint16, sshPort uint16) error {
 		r, err := getRepo()
 		if err != nil {
 			return fmt.Errorf("failed to open database: %w", err)
@@ -102,6 +103,9 @@ func main() {
 			d.Start(daemonCtx)
 		}()
 
+		// Start background ECH coordinator (handles rotation schedule, SSH pull server, and two-phase DNS sync)
+		go daemon.RunECHCoordinator(daemonCtx, r, sshPort)
+
 		// Start REST API server
 		state := &api.AppState{
 			Repo:           r,
@@ -116,7 +120,7 @@ func main() {
 			Handler: router,
 		}
 
-		slog.Info("HTTP server starting", "addr", addr)
+		slog.Info("HTTP server starting", "addr", addr, "version", version.Full())
 
 		serverErr := make(chan error, 1)
 		go func() {

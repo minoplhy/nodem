@@ -1,0 +1,44 @@
+# Stage 1: Build OpenSSL 4.0.2 from source with native ECH support
+FROM alpine:latest AS builder
+
+RUN apk add --no-cache \
+    git \
+    build-base \
+    perl \
+    linux-headers
+
+WORKDIR /src
+
+# Locked to stable release tag openssl-4.0.2 (latest OpenSSL 4.0.x)
+ARG OPENSSL_TAG=openssl-4.0.2
+RUN git clone --depth 1 --branch "${OPENSSL_TAG}" https://github.com/openssl/openssl.git
+
+WORKDIR /src/openssl
+
+# ECH is enabled by default in OpenSSL 4.0+; enable-ech is obsolete
+RUN ./Configure \
+    --prefix=/opt/openssl \
+    --openssldir=/opt/openssl/ssl \
+    no-shared \
+    no-tests \
+    no-docs \
+    no-unit-test
+
+RUN make -j"$(nproc)"
+RUN make install_sw
+
+# Stage 2: Minimal runtime image (Alpine latest-stable)
+FROM alpine:latest
+
+LABEL maintainer="node_monitor"
+LABEL description="Minimal OpenSSL 4.0.2 container with native ECH key generation"
+
+COPY --from=builder /opt/openssl /opt/openssl
+
+ENV PATH="/opt/openssl/bin:${PATH}"
+
+# Workspace directory for mounting keys
+WORKDIR /data
+
+ENTRYPOINT ["/opt/openssl/bin/openssl"]
+CMD ["version"]

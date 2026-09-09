@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 type AddIpRequest struct {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"node_monitor_go/internal/notifications"
+	"github.com/minoplhy/nodem/internal/notifications"
 )
 
 type CreateNotificationChannelRequest struct {

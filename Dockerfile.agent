@@ -1,0 +1,53 @@
+# ==============================================================================
+# Dockerfile: ECH Edge Agent (ech_agent)
+# Lightweight agent pulling ECH keys over HTTPS or SSH and reloading local proxies
+# ==============================================================================
+
+# --- Stage 1: Build Agent Binary ---
+FROM golang:1.26-bookworm AS builder
+WORKDIR /build
+
+ENV GOTOOLCHAIN=auto
+
+# Cache Go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy agent sources and dependencies
+COPY cmd/ech_agent ./cmd/ech_agent
+COPY internal ./internal
+
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_DATE=""
+
+# Compile statically linked agent binary
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X github.com/minoplhy/nodem/internal/version.Version=${VERSION} -X github.com/minoplhy/nodem/internal/version.Commit=${COMMIT} -X github.com/minoplhy/nodem/internal/version.BuildDate=${BUILD_DATE}" \
+    -o /build/ech_agent ./cmd/ech_agent
+
+# --- Stage 2: Minimal Agent Runtime ---
+FROM alpine:latest
+WORKDIR /app
+
+# Install CA certificates, timezone data, openssh client, and docker-cli for container reloading
+RUN apk add --no-cache ca-certificates tzdata curl bash openssh-client docker-cli
+
+# Copy compiled agent executable and create alias symlink
+COPY --from=builder /build/ech_agent /usr/local/bin/ech_agent
+RUN ln -sf /usr/local/bin/ech_agent /usr/local/bin/nodem-agent
+
+# Create default staging directory
+RUN mkdir -p /opt/ech
+
+# Default fallback environment variables (can be overridden by .env.agent)
+ENV ECH_SERVER=http://host.docker.internal:8080 \
+    ECH_TRANSPORT=https \
+    ECH_STORAGE_DIR=/opt/ech \
+    ECH_PROXY=nginx \
+    ECH_INTERVAL=300 \
+    ECH_SSH_PORT=34234
+
+ENTRYPOINT ["/usr/local/bin/ech_agent"]
+CMD []
+

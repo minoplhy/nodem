@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 func setupTestDB(t *testing.T) (*SqliteRepository, func()) {

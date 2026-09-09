@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 func TestCheckTCP(t *testing.T) {

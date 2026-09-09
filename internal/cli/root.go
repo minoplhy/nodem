@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"golang.org/x/crypto/bcrypt"
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/version"
 )
 
 var (
@@ -18,11 +20,22 @@ var (
 )
 
 // RootCmd builds and returns the root cobra Command.
-func RootCmd(getRepo func() (db.Repository, error), runDaemon func(port uint16) error) *cobra.Command {
+func RootCmd(getRepo func() (db.Repository, error), runDaemon func(port uint16, sshPort uint16) error) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "node_monitor",
-		Short: "Multi-tenant dynamic DNS node monitor and failover manager",
+		Use:     "nodem",
+		Aliases: []string{"node_monitor"},
+		Short:   "nodem - NodeManager + ECH Manager control plane",
+		Version: version.Full(),
 	}
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print version, commit tag, and build fingerprint",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("nodem %s\n", version.Full())
+		},
+	}
+	root.AddCommand(versionCmd)
 
 	root.SetGlobalNormalizationFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
 		return pflag.NormalizedName(strings.ReplaceAll(name, "_", "-"))
@@ -32,14 +45,28 @@ func RootCmd(getRepo func() (db.Repository, error), runDaemon func(port uint16) 
 
 	// 1. Daemon Command
 	var daemonPort uint16
+	var sshPort uint16
 	daemonCmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Start the monitoring daemon and web server",
+		Short: "Start the monitoring daemon, web server, and ECH coordinator",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDaemon(daemonPort)
+			return runDaemon(daemonPort, sshPort)
 		},
 	}
-	daemonCmd.Flags().Uint16VarP(&daemonPort, "port", "p", 8080, "HTTP server listening port")
+	portDef := uint16(8080)
+	if pStr := os.Getenv("PORT"); pStr != "" {
+		if p, err := strconv.ParseUint(pStr, 10, 16); err == nil {
+			portDef = uint16(p)
+		}
+	}
+	sshPortDef := uint16(34234)
+	if pStr := os.Getenv("ECH_SSH_PORT"); pStr != "" {
+		if p, err := strconv.ParseUint(pStr, 10, 16); err == nil {
+			sshPortDef = uint16(p)
+		}
+	}
+	daemonCmd.Flags().Uint16VarP(&daemonPort, "port", "p", portDef, "HTTP server listening port")
+	daemonCmd.Flags().Uint16Var(&sshPort, "ssh-port", sshPortDef, "ECH SSH pull server port (0 to disable)")
 	root.AddCommand(daemonCmd)
 
 	// 2. Bootstrap Command

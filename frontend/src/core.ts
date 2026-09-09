@@ -14,7 +14,7 @@ export interface DnsProviderConfig {
   id: number;
   tenant_id?: number;
   name: string;
-  provider_type: 'Cloudflare' | 'Technitium' | string;
+  provider_type: 'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook' | string;
   api_url: string;
   token: string;
   zone: string;
@@ -133,3 +133,83 @@ export async function fn(url: string, options: RequestInit = {}): Promise<Respon
   options.credentials = 'include';
   return fetch(url, options);
 }
+
+// --- ECH Subsystem Types ---
+
+export interface ECHCluster {
+  id: number;
+  tenant_id: number;
+  name: string;
+  public_name: string;
+  cipher_suite: string;
+  max_name_len: number;
+  current_version: number;
+  rotation_interval_hours: number;
+  auto_rotate: boolean;
+  last_rotated_at?: string | null;
+  next_rotation_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ECHClusterStatus {
+  cluster_id: number;
+  cluster_name: string;
+  public_name: string;
+  last_applied_version: number;
+  sync_status: 'IN_SYNC' | 'OUTDATED' | 'FAILED' | 'PENDING' | string;
+  last_error?: string | null;
+  last_synced_at?: string | null;
+}
+
+export interface ECHNode {
+  id: number;
+  tenant_id: number;
+  name: string;
+  pull_transport: 'HTTPS' | 'SSH';
+  ssh_public_key?: string | null;
+  proxy_type: 'NGINX' | 'CADDY' | 'HAPROXY' | 'HOOK' | string;
+  last_seen_at?: string | null;
+  last_ip?: string | null;
+  clusters?: ECHClusterStatus[];
+  created_at: string;
+}
+
+export interface ECHClusterNode {
+  cluster_id: number;
+  node_id: number;
+  node_name: string;
+  pull_transport: 'HTTPS' | 'SSH';
+  proxy_type: 'NGINX' | 'CADDY' | 'HAPROXY' | 'HOOK' | string;
+  last_applied_version: number;
+  sync_status: 'IN_SYNC' | 'OUTDATED' | 'FAILED' | 'PENDING' | string;
+  last_error?: string | null;
+  last_synced_at?: string | null;
+}
+
+export interface ECHDomain {
+  id: number;
+  cluster_id: number;
+  dns_provider_id: number;
+  target_group_id?: number | null;
+  domain: string;
+  ttl: number;
+  alpn: string;
+  ipv4_hint?: string | null;
+  ipv6_hint?: string | null;
+  last_synced_at?: string | null;
+  dns_status: 'SYNCED' | 'PENDING' | 'FAILED' | string;
+  created_at: string;
+}
+
+export interface ECHLog {
+  id: number;
+  cluster_id: number;
+  node_id?: number | null;
+  domain_id?: number | null;
+  event_type: string;
+  message: string;
+  details?: string;
+  created_at: string;
+}
+

@@ -1,11 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { fn, API_URL } from '../core';
-import type { TargetGroup, TargetIp, CheckConfig, CheckState } from '../core';
+import type { TargetGroup, TargetIp, CheckConfig, CheckState, ECHCluster } from '../core';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { RefreshIcon, ServerIcon, ExternalLinkIcon, AlertTriangleIcon } from '../components/icons/Icons';
+import { RefreshIcon, ServerIcon, ExternalLinkIcon, AlertTriangleIcon, KeyIcon } from '../components/icons/Icons';
 import { usePolling } from '../hooks/usePolling';
 
 interface DashboardProps {
@@ -15,6 +15,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageGroup }) => {
   const [groups, setGroups] = useState<TargetGroup[]>([]);
+  const [echClusters, setEchClusters] = useState<ECHCluster[]>([]);
   const [statuses, setStatuses] = useState<
     Record<number, { ips: TargetIp[]; checks: CheckConfig[]; states: CheckState[]; unmanaged_ips?: string[] }>
   >({});
@@ -23,14 +24,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fn(`${API_URL}/groups/status`);
-      if (res.ok) {
-        const data = await res.json();
+      const [groupsRes, echRes] = await Promise.all([
+        fn(`${API_URL}/groups/status`),
+        fn(`${API_URL}/ech/clusters`),
+      ]);
+
+      if (groupsRes.ok) {
+        const data = await groupsRes.json();
         setGroups(data.groups || []);
         setStatuses(data.statuses || {});
         setError(false);
       } else {
         setError(true);
+      }
+
+      if (echRes.ok) {
+        const echData = await echRes.json();
+        setEchClusters(Array.isArray(echData) ? echData : []);
+      } else {
+        setEchClusters([]);
       }
     } catch (err) {
       setError(true);
@@ -110,6 +122,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
           <div className="stat-label" style={{ color: 'var(--error)' }}>Nodes Offline (DOWN)</div>
           <div className="stat-value" style={{ color: '#fb7185' }}>{nodesDown}</div>
           <div className="stat-meta">Removed or failing checks</div>
+        </div>
+
+        <div
+          className="stat-card glass-panel"
+          style={{ cursor: 'pointer', borderColor: 'var(--primary-glow)' }}
+          onClick={() => onNavigateToTab('ech')}
+          title="Click to manage ECH Clusters"
+        >
+          <div className="stat-label" style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <KeyIcon size={14} />
+            <span>ECH Clusters</span>
+          </div>
+          <div className="stat-value" style={{ color: 'var(--primary)' }}>{echClusters?.length || 0}</div>
+          <div className="stat-meta">TLS 1.3 Key Rotation</div>
         </div>
       </div>
 

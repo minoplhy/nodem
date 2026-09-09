@@ -8,7 +8,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 // SqliteRepository implements db.Repository using SQLite.

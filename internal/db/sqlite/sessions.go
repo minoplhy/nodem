@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/misc"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/misc"
 )
 
 func (r *SqliteRepository) CreateSession(ctx context.Context, sessionID, publicID string, userID int64, expiresAt time.Time, ipAddress, userAgent *string) error {

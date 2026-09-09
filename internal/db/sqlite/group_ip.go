@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/misc"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/misc"
 )
 
 func (r *SqliteRepository) ListIPs(ctx context.Context, groupID int64) ([]db.TargetIp, error) {

@@ -92,4 +92,51 @@ type Repository interface {
 	ListGroupAnomalies(ctx context.Context, groupID int64) ([]string, error)
 	AddGroupAnomaly(ctx context.Context, groupID int64, ip string) error
 	DeleteGroupAnomaly(ctx context.Context, groupID int64, ip string) error
+
+	// ECH Cluster Operations
+	GetECHCluster(ctx context.Context, tenantID, id int64) (*ECHCluster, error)
+	GetECHClusterDirect(ctx context.Context, id int64) (*ECHCluster, error)
+	ListECHClusters(ctx context.Context, tenantID int64) ([]ECHCluster, error)
+	ListAllECHClusters(ctx context.Context) ([]ECHCluster, error)
+	CreateECHCluster(ctx context.Context, tenantID int64, name, publicName, cipherSuite string, maxNameLen, rotationIntervalHours int, autoRotate bool, signingPublicKey, signingPrivateKey string) (*ECHCluster, error)
+	UpdateECHCluster(ctx context.Context, tenantID, id int64, name, publicName, cipherSuite string, maxNameLen, rotationIntervalHours int, autoRotate bool) (*ECHCluster, error)
+	DeleteECHCluster(ctx context.Context, tenantID, id int64) error
+	IncrementClusterVersion(ctx context.Context, clusterID int64, lastRotated, nextRotation time.Time) (int64, error)
+
+	// ECH Key Operations
+	GetActiveECHKey(ctx context.Context, clusterID int64) (*ECHKey, error)
+	GetPreviousECHKey(ctx context.Context, clusterID int64) (*ECHKey, error)
+	GetECHKeyByVersion(ctx context.Context, clusterID, version int64) (*ECHKey, error)
+	ListECHKeys(ctx context.Context, clusterID int64) ([]ECHKey, error)
+	SaveNewECHKey(ctx context.Context, clusterID, version int64, base64ECH, privateKeyPEM, echConfigPEM, fullPEM string) (*ECHKey, error)
+
+	// ECH Node Operations (Independent of Cluster)
+	GetECHNode(ctx context.Context, id int64) (*ECHNode, error)
+	GetECHNodeByTokenHash(ctx context.Context, hash string) (*ECHNode, error)
+	GetECHNodeBySSHPublicKey(ctx context.Context, sshPubKey string) (*ECHNode, error)
+	ListTenantECHNodes(ctx context.Context, tenantID int64) ([]ECHNode, error)
+	CreateECHNode(ctx context.Context, tenantID int64, name, pullTransport string, authTokenHash *string, sshPublicKey *string, proxyType string) (*ECHNode, error)
+	UpdateECHNode(ctx context.Context, tenantID, nodeID int64, name, pullTransport, proxyType string, sshPublicKey *string) (*ECHNode, error)
+	DeleteECHNode(ctx context.Context, tenantID, id int64) error
+	UpdateECHNodeLastSeen(ctx context.Context, nodeID int64, lastIP string) error
+
+	// ECH Cluster-Node Association Operations
+	ListClusterNodes(ctx context.Context, clusterID int64) ([]ECHClusterNode, error)
+	ListNodeClusters(ctx context.Context, nodeID int64) ([]ECHCluster, error)
+	AssignNodeToCluster(ctx context.Context, clusterID, nodeID int64) error
+	UnassignNodeFromCluster(ctx context.Context, clusterID, nodeID int64) error
+	SetNodeClusters(ctx context.Context, nodeID int64, clusterIDs []int64) error
+	RecordClusterNodeAck(ctx context.Context, clusterID, nodeID, appliedVersion int64, status, lastIP string, lastError *string) error
+	AreAllNodesInSync(ctx context.Context, clusterID, expectedVersion int64) (bool, error)
+
+	// ECH Domain Operations
+	GetECHDomain(ctx context.Context, id int64) (*ECHDomain, error)
+	ListECHDomains(ctx context.Context, clusterID int64) ([]ECHDomain, error)
+	CreateECHDomain(ctx context.Context, clusterID, dnsProviderID int64, targetGroupID *int64, domain string, ttl int, alpn string, ipv4Hint, ipv6Hint *string) (*ECHDomain, error)
+	DeleteECHDomain(ctx context.Context, id int64) error
+	UpdateECHDomainSyncStatus(ctx context.Context, id int64, status string, lastSyncedAt *time.Time) error
+
+	// ECH Log Operations
+	AddECHLog(ctx context.Context, clusterID int64, nodeID, domainID *int64, eventType, message string) (*ECHLog, error)
+	ListRecentECHLogs(ctx context.Context, clusterID int64, limit int64) ([]ECHLog, error)
 }

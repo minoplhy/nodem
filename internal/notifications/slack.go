@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 // SlackNotifier sends webhook notifications to Slack.

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-	"node_monitor_go/internal/misc"
+	"github.com/minoplhy/nodem/internal/misc"
 )
 
 type SetupRequest struct {

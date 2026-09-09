@@ -1,4 +1,4 @@
-module node_monitor_go
+module github.com/minoplhy/nodem
 
 go 1.26.5
 

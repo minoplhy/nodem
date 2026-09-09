@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"node_monitor_go/internal/db"
-	"node_monitor_go/internal/notifications"
+	"github.com/minoplhy/nodem/internal/db"
+	"github.com/minoplhy/nodem/internal/notifications"
 )
 
 func dispatchBatchedNotifications(

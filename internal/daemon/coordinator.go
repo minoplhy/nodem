@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 type activeTask struct {

@@ -1,21 +1,22 @@
 services:
-  node_monitor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: node_monitor
+  nodem:
+    image: ghcr.io/minoplhy/nodem:latest
+    container_name: nodem
+    restart: unless-stopped
     ports:
       - "8080:8080"
+      - "34234:34234" # ECH SSH pull server port
     environment:
       - BASE_PATH=/
+      - PORT=8080
+      - ECH_SSH_PORT=34234
     volumes:
-      - ./node_monitor_data:/app/data
-    restart: unless-stopped
+      - ./nodem_data:/app/data
     networks:
-      - monitor_net
+      - nodem_net
 
 networks:
-  monitor_net:
+  nodem_net:
     enable_ipv6: true
     ipam:
       driver: default

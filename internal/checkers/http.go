@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 func checkHTTPHTTPS(ctx context.Context, ip net.IP, config *db.CheckConfig) CheckResult {

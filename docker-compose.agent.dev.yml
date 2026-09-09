@@ -1,0 +1,26 @@
+services:
+  nodem_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+      args:
+        VERSION: dev
+        COMMIT: local
+    image: nodem-agent:dev
+    container_name: nodem_agent_dev
+    restart: unless-stopped
+    # Loads configuration directly from .env.agent (or custom file via ENV_FILE)
+    env_file:
+      - ${ENV_FILE:-.env.agent}
+
+    volumes:
+      # Staging directory where ECH configs and PEM keys are written.
+      # Mount this to your proxy's config/certs directory or shared volume.
+      - ./agent_data:/opt/ech
+      # Optional: Mount Docker socket to allow reloading dockerized reverse proxies via docker exec
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Optional: Mount SSH private key if using SSH pull transport
+      # - ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+    extra_hosts:
+      # Allows reaching host-bound services from within the container on Linux
+      - "host.docker.internal:host-gateway"

@@ -21,7 +21,7 @@ export const Providers: React.FC = () => {
 
   // Form states
   const [name, setName] = useState('');
-  const [providerType, setProviderType] = useState<'Cloudflare' | 'Technitium'>('Cloudflare');
+  const [providerType, setProviderType] = useState<'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook'>('Cloudflare');
   const [apiUrl, setApiUrl] = useState('https://api.cloudflare.com');
   const [token, setToken] = useState('');
   const [zone, setZone] = useState('');
@@ -66,14 +66,18 @@ export const Providers: React.FC = () => {
     setShowModal(true);
   };
 
-  const handleTypeChange = (t: 'Cloudflare' | 'Technitium') => {
+  const handleTypeChange = (t: 'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook') => {
     setProviderType(t);
     if (t === 'Cloudflare') {
       setApiUrl('https://api.cloudflare.com');
-    } else {
-      if (apiUrl === 'https://api.cloudflare.com') {
+    } else if (t === 'Technitium') {
+      if (apiUrl === 'https://api.cloudflare.com' || apiUrl === 'https://desec.io' || !apiUrl) {
         setApiUrl('http://technitium.local:5380');
       }
+    } else if (t === 'deSEC') {
+      setApiUrl('https://desec.io');
+    } else if (t === 'Hook') {
+      setApiUrl('/opt/hooks/dns_update.sh');
     }
   };
 
@@ -270,6 +274,8 @@ export const Providers: React.FC = () => {
               >
                 <option value="Cloudflare">Cloudflare DNS</option>
                 <option value="Technitium">Technitium DNS Server</option>
+                <option value="deSEC">deSEC.io DNS</option>
+                <option value="Hook">Hook Script / Webhook</option>
               </select>
             </div>
 
@@ -281,34 +287,42 @@ export const Providers: React.FC = () => {
                 value={zone}
                 onChange={(e) => setZone(e.target.value)}
                 placeholder="example.com"
-                required
+                required={providerType !== 'Hook'}
               />
             </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">API Base URL</label>
+            <label className="form-label">
+              {providerType === 'Hook' ? 'Script Executable Path or Webhook URL' : 'API Base URL'}
+            </label>
             <input
               type="text"
               className="form-input font-mono"
               value={apiUrl}
               onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="https://api.cloudflare.com"
+              placeholder={providerType === 'Hook' ? '/opt/hooks/dns_update.sh or https://webhook' : 'https://api.cloudflare.com'}
               required
             />
           </div>
 
           <div className="form-group">
             <label className="form-label">
-              {providerType === 'Cloudflare' ? 'Cloudflare API Token' : 'Technitium API Token / Key'}
+              {providerType === 'Cloudflare'
+                ? 'Cloudflare API Token'
+                : providerType === 'deSEC'
+                ? 'deSEC.io API Token'
+                : providerType === 'Hook'
+                ? 'Authorization / Secret Token (Optional)'
+                : 'Technitium API Token / Key'}
             </label>
             <input
               type="password"
               className="form-input font-mono"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter secret token"
-              required
+              placeholder={providerType === 'Hook' ? 'Optional secret or auth header' : 'Enter secret token'}
+              required={providerType !== 'Hook'}
               autoComplete="new-password"
             />
           </div>

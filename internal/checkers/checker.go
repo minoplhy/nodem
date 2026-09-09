@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 
-	"node_monitor_go/internal/db"
+	"github.com/minoplhy/nodem/internal/db"
 )
 
 // CheckResult represents the outcome of a health check probe.

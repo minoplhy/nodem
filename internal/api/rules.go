@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"node_monitor_go/internal/rules"
+	"github.com/minoplhy/nodem/internal/rules"
 )
 
 type AddRuleRequest struct {

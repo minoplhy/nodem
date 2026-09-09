@@ -1,0 +1,32 @@
+services:
+  nodem:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: local
+    image: nodem:dev
+    container_name: nodem-dev
+    ports:
+      - "8080:8080"
+      - "34234:34234" # ECH SSH pull server ingress port
+    environment:
+      - BASE_PATH=/
+      - PORT=8080
+      - ECH_SSH_PORT=34234
+    volumes:
+      - ./nodem_dev_data:/app/data
+    restart: unless-stopped
+    networks:
+      - nodem_dev_net
+
+networks:
+  nodem_dev_net:
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/16
+        - subnet: fd00:cafe:f00d::/64
+
