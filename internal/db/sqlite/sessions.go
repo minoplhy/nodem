@@ -53,11 +53,13 @@ func (r *SqliteRepository) GetSession(ctx context.Context, sessionID string) (*d
 	}
 	s.LastActive = scanNullTime(lastActiveStr)
 
-	// Asynchronously update last_active
-	go func(sid string) {
-		updateQuery := "UPDATE sessions SET last_active = ? WHERE session_id = ?"
-		_, _ = r.db.Exec(updateQuery, time.Now().UTC().Format(time.RFC3339), sid)
-	}(sessionID)
+	// Asynchronously update last_active if not updated recently (throttled to 10s)
+	if s.LastActive == nil || time.Since(*s.LastActive) > 10*time.Second {
+		go func(sid string) {
+			updateQuery := "UPDATE sessions SET last_active = ? WHERE session_id = ?"
+			_, _ = r.db.Exec(updateQuery, time.Now().UTC().Format(time.RFC3339), sid)
+		}(sessionID)
+	}
 
 	return &s, nil
 }

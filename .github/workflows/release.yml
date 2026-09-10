@@ -160,13 +160,18 @@ jobs:
       - name: Download All Binaries
         uses: actions/download-artifact@v4
         with:
+          pattern: 'binaries-*'
           path: all_binaries
           merge-multiple: true
 
       - name: Generate Checksums
         run: |
           cd all_binaries
-          sha256sum * > checksums.txt
+          for file in *; do
+            if [ -f "$file" ] && [ "$file" != "checksums.txt" ]; then
+              sha256sum "$file"
+            fi
+          done > checksums.txt
           cat checksums.txt
 
       - name: Determine Tag
