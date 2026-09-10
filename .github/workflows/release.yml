@@ -118,7 +118,7 @@ jobs:
           mkdir -p build_out
           go build -ldflags="${LDFLAGS}" -o "build_out/nodem-${{ steps.vars.outputs.platform }}" ./cmd/nodem
 
-      - name: Compile ech_agent (Edge Agent)
+      - name: Compile nodem-agent (Edge Agent)
         env:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.os }}
@@ -130,9 +130,7 @@ jobs:
             -X github.com/minoplhy/nodem/internal/version.Commit=${{ steps.vars.outputs.commit }} \
             -X github.com/minoplhy/nodem/internal/version.BuildDate=${{ steps.vars.outputs.build_date }}"
 
-          # Compile both standard names for seamless compatibility
-          go build -ldflags="${LDFLAGS}" -o "build_out/ech_agent-${{ steps.vars.outputs.platform }}" ./cmd/ech_agent
-          go build -ldflags="${LDFLAGS}" -o "build_out/nodem-agent-${{ steps.vars.outputs.platform }}" ./cmd/ech_agent
+          go build -ldflags="${LDFLAGS}" -o "build_out/nodem-agent-${{ steps.vars.outputs.platform }}" ./cmd/nodem-agent
 
       - name: Package Archives
         run: |
@@ -140,7 +138,7 @@ jobs:
           # Create archive for server
           tar -czvf "nodem-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.platform }}.tar.gz" "nodem-${{ steps.vars.outputs.platform }}"
           # Create archive for agent
-          tar -czvf "nodem-agent-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.platform }}.tar.gz" "ech_agent-${{ steps.vars.outputs.platform }}" "nodem-agent-${{ steps.vars.outputs.platform }}"
+          tar -czvf "nodem-agent-${{ steps.vars.outputs.version }}-${{ steps.vars.outputs.platform }}.tar.gz" "nodem-agent-${{ steps.vars.outputs.platform }}"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4

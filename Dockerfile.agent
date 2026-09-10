@@ -14,7 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy agent sources and dependencies
-COPY cmd/ech_agent ./cmd/ech_agent
+COPY cmd/nodem-agent ./cmd/nodem-agent
 COPY internal ./internal
 
 ARG VERSION=dev
@@ -24,7 +24,7 @@ ARG BUILD_DATE=""
 # Compile statically linked agent binary
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X github.com/minoplhy/nodem/internal/version.Version=${VERSION} -X github.com/minoplhy/nodem/internal/version.Commit=${COMMIT} -X github.com/minoplhy/nodem/internal/version.BuildDate=${BUILD_DATE}" \
-    -o /build/ech_agent ./cmd/ech_agent
+    -o /build/nodem-agent ./cmd/nodem-agent
 
 # --- Stage 2: Minimal Agent Runtime ---
 FROM alpine:latest
@@ -34,8 +34,8 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata curl bash openssh-client docker-cli
 
 # Copy compiled agent executable and create alias symlink
-COPY --from=builder /build/ech_agent /usr/local/bin/ech_agent
-RUN ln -sf /usr/local/bin/ech_agent /usr/local/bin/nodem-agent
+COPY --from=builder /build/nodem-agent /usr/local/bin/nodem-agent
+RUN ln -sf /usr/local/bin/nodem-agent /usr/local/bin/ech_agent
 
 # Create default staging directory
 RUN mkdir -p /opt/ech
@@ -48,6 +48,6 @@ ENV ECH_SERVER=http://host.docker.internal:8080 \
     ECH_INTERVAL=300 \
     ECH_SSH_PORT=34234
 
-ENTRYPOINT ["/usr/local/bin/ech_agent"]
+ENTRYPOINT ["/usr/local/bin/nodem-agent"]
 CMD []
 

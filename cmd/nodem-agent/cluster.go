@@ -15,7 +15,7 @@ const DefaultStorageDir = "/opt/ech"
 func handleClusterCommand(args []string) error {
 	subArgs := args[1:]
 	if len(subArgs) == 0 {
-		return fmt.Errorf("missing cluster action: list, remove (or rm), prune\nUsage: ech_agent cluster <action> [flags]")
+		return fmt.Errorf("missing cluster action: list, remove (or rm), prune\nUsage: nodem-agent cluster <action> [flags]")
 	}
 
 	action := strings.ToLower(subArgs[0])
@@ -105,7 +105,7 @@ func handleClusterRemove(args []string) error {
 	_ = fs.Parse(filteredArgs)
 
 	if target == "" {
-		return fmt.Errorf("usage: ech_agent cluster remove <cluster-id-or-name> [--yes] [--dry-run]")
+		return fmt.Errorf("usage: nodem-agent cluster remove <cluster-id-or-name> [--yes] [--dry-run]")
 	}
 
 	stateFile := filepath.Join(*storageDir, "agent_state.json")

@@ -103,7 +103,7 @@
 
 ---
 
-#### B. Edge Agent (`nodem-agent` / `ech_agent`)
+#### B. Edge Agent (`nodem-agent`)
 
 Deploy this lightweight daemon on each edge reverse proxy server (Nginx, Caddy, HAProxy, or custom hook) to pull ECH key updates from the control plane.
 
@@ -241,31 +241,26 @@ For bare-metal servers, virtual machines, or environments where Docker is not av
    ```
    Available flags:
    - `--server <url>`: Central nodem server URL (*required*)
-   - `--token <token>`: Edge agent secret token (*required*)
-   - `--proxy <type>`: Reverse proxy type: `nginx`, `caddy`, `haproxy`, or `hook` (default: `nginx`)
-   - `--transport <type>`: Pull transport: `https` or `ssh` (default: `https`)
-   - `--interval <secs>`: Polling interval in seconds (default: `300`)
-   - `--storage-dir <dir>`: Directory where ECH keys are written (default: `/opt/ech`)
-   - `--init-system <sys>`: Init system: `auto`, `systemd`, `openrc`, or `none` (default: `auto`)
-   - `--reload-cmd <cmd>`: Custom proxy reload command override
-   - `--hook <path>`: Custom script path when `--proxy=hook`
-   - `--ssh-port <port>`: SSH server port for ssh transport (default: `34234`)
-   - `--ssh-key <path>`: Path to agent SSH private key
-   - `--no-service`: Skip background daemon service registration
+2. **Common Flags:**
+   - `--proxy`: `nginx`, `caddy`, `haproxy`, `hook`
+   - `--transport`: `https` or `ssh` (port 34234)
+   - `--interval`: Sync frequency in seconds (default: 300)
+   - `--storage-dir`: Key directory (default: `/opt/ech`)
+   - `--once`: Execute single sync and exit
    - `--dry-run`: Simulate operations without modifying system
 
 3. **Background Daemon Management:**
    - **Systemd**:
      ```bash
-     sudo systemctl status ech-agent
-     sudo systemctl restart ech-agent
-     sudo systemctl stop ech-agent
+     sudo systemctl status nodem-agent
+     sudo systemctl restart nodem-agent
+     sudo systemctl stop nodem-agent
      ```
    - **OpenRC**:
      ```bash
-     sudo rc-service ech-agent status
-     sudo rc-service ech-agent restart
-     sudo rc-service ech-agent stop
+     sudo rc-service nodem-agent status
+     sudo rc-service nodem-agent restart
+     sudo rc-service nodem-agent stop
      ```
 
 4. **Uninstallation:**
@@ -293,7 +288,7 @@ For bare-metal servers, virtual machines, or environments where Docker is not av
                 v                                                   v
      +---------------------+                             +---------------------+
      |    Edge Node 1      |                             |    Edge Node 2      |
-     | - ech_agent daemon  |                             | - ech_agent daemon  |
+     | - nodem-agent       |                             | - nodem-agent       |
      | - Atomic /opt/ech   |                             | - Atomic /opt/ech   |
      | - Reloads Nginx     |                             | - Reloads Caddy     |
      +---------------------+                             +---------------------+
@@ -314,14 +309,14 @@ cd ..
 # 2. Build nodem server binary
 go build -ldflags="-s -w -X github.com/minoplhy/nodem/internal/version.Version=v1.0.0" -o nodem ./cmd/nodem
 
-# 3. Build ech_agent edge binary
-go build -ldflags="-s -w -X github.com/minoplhy/nodem/internal/version.Version=v1.0.0" -o ech_agent ./cmd/ech_agent
+# 3. Build nodem-agent edge binary
+go build -ldflags="-s -w -X github.com/minoplhy/nodem/internal/version.Version=v1.0.0" -o nodem-agent ./cmd/nodem-agent
 ```
 
 Check version:
 ```bash
 ./nodem version
-./ech_agent version
+./nodem-agent version
 ```
 
 ---

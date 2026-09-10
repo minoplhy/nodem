@@ -13,10 +13,10 @@
 
 set -euo pipefail
 
-SERVICE_NAME="ech-agent"
-CONFIG_DIR="/etc/ech_agent"
+SERVICE_NAME="nodem-agent"
+CONFIG_DIR="/etc/nodem-agent"
 STORAGE_DIR="/opt/ech"
-BIN_PATH="/usr/local/bin/ech_agent"
+BIN_PATH="/usr/local/bin/nodem-agent"
 PURGE_DATA=false
 DRY_RUN=false
 
@@ -68,8 +68,9 @@ fi
 
 # 4. Remove binaries and configuration
 rm -f "$BIN_PATH"
-rm -f "$(dirname "$BIN_PATH")/nodem-agent"
+rm -f "$(dirname "$BIN_PATH")/ech_agent"
 rm -rf "$CONFIG_DIR"
+rm -rf "/etc/ech_agent"
 echo "==> Removed agent binary and $CONFIG_DIR"
 
 # 5. Purge key storage if requested
@@ -80,4 +81,4 @@ else
     echo "==> Preserved key directory $STORAGE_DIR (use --purge to delete)."
 fi
 
-echo "==> [Agent Uninstaller] SUCCESS! ech-agent has been completely uninstalled."
+echo "==> [Agent Uninstaller] SUCCESS! nodem-agent has been completely uninstalled."
