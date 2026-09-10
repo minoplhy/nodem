@@ -390,4 +390,33 @@ func TestIndependentECHNodeCRUDAndClusterAssignment(t *testing.T) {
 	}
 }
 
+func TestGetServerPublicKeyEndpoint(t *testing.T) {
+	repo, user, _, router := setupAPITestDB(t)
+	ctx := context.Background()
+
+	sessionID := "test_session_server_key"
+	_ = repo.CreateSession(ctx, sessionID, "pub_test", user.ID, time.Now().Add(24*time.Hour), nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/ech/server-key", nil)
+	req.AddCookie(&http.Cookie{Name: "session_id", Value: sessionID})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/ech/server-key failed: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp api.ServerPublicKeyResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed decoding json: %v", err)
+	}
+
+	if resp.ServerPublicKey == "" {
+		t.Errorf("expected non-empty server_public_key")
+	}
+	if resp.Algorithm != "ed25519" {
+		t.Errorf("expected algorithm ed25519, got %s", resp.Algorithm)
+	}
+}
+
 

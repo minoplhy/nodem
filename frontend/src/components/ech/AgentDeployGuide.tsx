@@ -3,6 +3,7 @@ import { CodeBlock } from '../ui/CodeBlock';
 
 interface AgentDeployGuideProps {
   token?: string;
+  serverPublicKey?: string;
   proxyType?: string;
   controlPlaneUrl?: string;
   allowProxySelection?: boolean;
@@ -10,6 +11,7 @@ interface AgentDeployGuideProps {
 
 export const AgentDeployGuide: React.FC<AgentDeployGuideProps> = ({
   token,
+  serverPublicKey,
   proxyType: initialProxyType = 'nginx',
   controlPlaneUrl = '',
   allowProxySelection = false,
@@ -20,10 +22,12 @@ export const AgentDeployGuide: React.FC<AgentDeployGuideProps> = ({
 
   const serverUrl = controlPlaneUrl || 'http://<server-ip>:8080';
   const tokenDisplay = token || '<TOKEN>';
+  const serverPubKeyDisplay = serverPublicKey || '<SERVER_PUBLIC_KEY>';
+  const serverPubKeyFlag = ` --server-public-key="${serverPubKeyDisplay}"`;
   const effectiveProxy = allowProxySelection ? proxy : initialProxyType;
 
   // Standalone daemon commands
-  const standaloneInstallCmd = `curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install-agent.sh | sudo bash -s -- --server="${serverUrl}" --token="${tokenDisplay}" --proxy="${effectiveProxy}"`;
+  const standaloneInstallCmd = `curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install-agent.sh | sudo bash -s -- --server="${serverUrl}" --token="${tokenDisplay}"${serverPubKeyFlag} --proxy="${effectiveProxy}"`;
   const standaloneUninstallCmd = `curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall-agent.sh | sudo bash`;
   const standalonePurgeCmd = `curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall-agent.sh | sudo bash -s -- --purge`;
 
@@ -36,6 +40,7 @@ export const AgentDeployGuide: React.FC<AgentDeployGuideProps> = ({
     environment:
       - ECH_SERVER=${serverUrl}
       - ECH_TOKEN=${tokenDisplay}
+      - ECH_SERVER_PUBLIC_KEY=${serverPubKeyDisplay}
       - ECH_PROXY=${effectiveProxy}
       - ECH_TRANSPORT=https
       - ECH_INTERVAL=300
@@ -44,7 +49,7 @@ export const AgentDeployGuide: React.FC<AgentDeployGuideProps> = ({
     extra_hosts:
       - "host.docker.internal:host-gateway"`;
 
-  const dockerRunCmd = `docker run -d --name nodem_agent --restart unless-stopped -e ECH_SERVER="${serverUrl}" -e ECH_TOKEN="${tokenDisplay}" -e ECH_PROXY="${effectiveProxy}" -v ./agent_data:/opt/ech --add-host host.docker.internal:host-gateway ghcr.io/minoplhy/nodem-agent:latest`;
+  const dockerRunCmd = `docker run -d --name nodem_agent --restart unless-stopped -e ECH_SERVER="${serverUrl}" -e ECH_TOKEN="${tokenDisplay}" -e ECH_SERVER_PUBLIC_KEY="${serverPubKeyDisplay}" -e ECH_PROXY="${effectiveProxy}" -v ./agent_data:/opt/ech --add-host host.docker.internal:host-gateway ghcr.io/minoplhy/nodem-agent:latest`;
   const dockerUninstallCmd = `docker compose down -v`;
   const dockerContainerRemoveCmd = `docker rm -f nodem_agent && rm -rf ./agent_data`;
 
@@ -108,6 +113,21 @@ export const AgentDeployGuide: React.FC<AgentDeployGuideProps> = ({
             <option value="haproxy">HAProxy</option>
             <option value="hook">Hook Script</option>
           </select>
+        </div>
+      )}
+
+      {/* Server Root Public Key Reference */}
+      {serverPublicKey && action === 'install' && (
+        <div style={{ background: 'var(--bg-surface-soft)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-main)' }}>
+              Server Root Public Key (Ed25519)
+            </span>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              Pinned on edge agent to verify payload signatures
+            </span>
+          </div>
+          <CodeBlock code={serverPublicKey} showPrompt={false} />
         </div>
       )}
 

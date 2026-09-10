@@ -52,6 +52,7 @@ func BuildRouter(state *AppState) http.Handler {
 			auth.Get("/me", state.Me)
 
 			// ECH Clusters & Management
+			auth.Get("/ech/server-key", state.GetServerPublicKey)
 			auth.Get("/ech/clusters", state.ListECHClusters)
 			auth.Post("/ech/clusters", state.CreateECHCluster)
 			auth.Get("/ech/clusters/{id}", state.GetECHCluster)

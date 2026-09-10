@@ -7,6 +7,7 @@ import { AgentDeployGuide } from '../AgentDeployGuide';
 interface RevealTokenModalProps {
   open: boolean;
   token: string;
+  serverPublicKey?: string;
   nodeName: string;
   proxyType?: string;
   controlPlaneUrl: string;
@@ -16,16 +17,17 @@ interface RevealTokenModalProps {
 export const RevealTokenModal: React.FC<RevealTokenModalProps> = ({
   open,
   token,
+  serverPublicKey,
   nodeName,
   proxyType = 'nginx',
   controlPlaneUrl,
   onClose,
 }) => {
   return (
-    <Modal open={open} title="Agent Token" onClose={onClose}>
+    <Modal open={open} title="Agent Credentials & Setup" onClose={onClose}>
       <div style={{ padding: '0.25rem 0' }}>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
-          Save this agent token to authenticate your node. It will not be shown again after closing this dialog.
+          Save these agent credentials. The authentication token will not be shown again after closing this dialog.
         </p>
 
         <div className="form-group mb-4">
@@ -34,7 +36,7 @@ export const RevealTokenModal: React.FC<RevealTokenModalProps> = ({
           </label>
           <CodeBlock
             code={token}
-            title="Token"
+            title="Agent Token"
             showPrompt={false}
           />
         </div>
@@ -45,6 +47,7 @@ export const RevealTokenModal: React.FC<RevealTokenModalProps> = ({
           </label>
           <AgentDeployGuide
             token={token}
+            serverPublicKey={serverPublicKey}
             proxyType={proxyType}
             controlPlaneUrl={controlPlaneUrl}
           />

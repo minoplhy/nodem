@@ -162,6 +162,11 @@ export interface ECHClusterStatus {
   last_synced_at?: string | null;
 }
 
+export interface ServerPublicKeyInfo {
+  server_public_key: string;
+  algorithm: string;
+}
+
 export interface ECHNode {
   id: number;
   tenant_id: number;

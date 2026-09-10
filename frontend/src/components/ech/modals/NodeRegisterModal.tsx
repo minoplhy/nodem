@@ -10,7 +10,7 @@ interface NodeRegisterModalProps {
   clusters: ECHCluster[];
   initialClusterId?: number | null;
   onClose: () => void;
-  onSuccess: (nodeName: string, token?: string, proxyType?: string) => void;
+  onSuccess: (nodeName: string, token?: string, proxyType?: string, serverPublicKey?: string) => void;
 }
 
 export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
@@ -64,10 +64,10 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
         const data = await res.json();
         onClose();
         if (data.agent_token) {
-          onSuccess(nodeName.trim(), data.agent_token, proxyType);
+          onSuccess(nodeName.trim(), data.agent_token, proxyType, data.server_public_key);
         } else {
           toast.success('SSH Node registered successfully');
-          onSuccess(nodeName.trim(), undefined, proxyType);
+          onSuccess(nodeName.trim(), undefined, proxyType, data.server_public_key);
         }
       } else {
         const err = await res.text();

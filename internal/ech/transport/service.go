@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -32,6 +31,13 @@ type SyncRequest struct {
 	Clusters  map[string]int64 `json:"clusters,omitempty"` // map of cluster_name -> local applied version
 }
 
+const PayloadTypeSyncKeyUpdate = "SYNC_KEY_UPDATE"
+
+// BuildSignableMessage creates a canonical domain-separated message digest string.
+func BuildSignableMessage(payloadType string, clusterID, version int64, checksum string) []byte {
+	return []byte(fmt.Sprintf("%s:%d:%d:%s", payloadType, clusterID, version, checksum))
+}
+
 type SyncKeysPayload struct {
 	Base64ECH      string `json:"base64_ech"`
 	ECHCurrentPEM  string `json:"ech_current_pem"`
@@ -40,10 +46,30 @@ type SyncKeysPayload struct {
 	ECHConfigPEM   string `json:"ech_config_pem"`
 }
 
+// Checksum computes a deterministic SHA-256 hex digest over the cryptographic payload material.
+func (p *SyncKeysPayload) Checksum() string {
+	if p == nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte(p.Base64ECH))
+	h.Write([]byte("\n"))
+	h.Write([]byte(p.ECHCurrentPEM))
+	h.Write([]byte("\n"))
+	h.Write([]byte(p.ECHPreviousPEM))
+	h.Write([]byte("\n"))
+	h.Write([]byte(p.PrivateKeyPEM))
+	h.Write([]byte("\n"))
+	h.Write([]byte(p.ECHConfigPEM))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 type SyncSignature struct {
-	Algorithm string `json:"algorithm"` // "ed25519"
-	SigBase64 string `json:"sig_base64"`
-	PublicKey string `json:"public_key"`
+	Type      string `json:"type"`       // Payload type, e.g. "SYNC_KEY_UPDATE"
+	Algorithm string `json:"algorithm"`  // "ed25519"
+	Checksum  string `json:"checksum"`   // SHA-256 hex digest of SyncKeysPayload
+	SigBase64 string `json:"sig_base64"` // Ed25519 signature of BuildSignableMessage
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 type ClusterSyncItem struct {
@@ -168,6 +194,11 @@ func (s *PullService) SyncNode(ctx context.Context, node *db.ECHNode, req SyncRe
 	items := make([]ClusterSyncItem, 0, len(clusters))
 	updatesAvailable := len(removedClusterIDs) > 0 || len(removedClusters) > 0
 
+	serverPubKey, serverPrivKey, err := s.repo.GetOrCreateServerSigningKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed retrieving server signing key: %w", err)
+	}
+
 	for _, cluster := range clusters {
 		localVersion, hasVersion := req.Clusters[fmt.Sprintf("%d", cluster.ID)]
 		if !hasVersion {
@@ -210,12 +241,9 @@ func (s *PullService) SyncNode(ctx context.Context, node *db.ECHNode, req SyncRe
 			keysPayload.ECHPreviousPEM = prevKey.FullPEM
 		}
 
-		payloadBytes, err := json.Marshal(keysPayload)
-		if err != nil {
-			return nil, fmt.Errorf("failed marshaling keys payload for cluster %s: %w", cluster.Name, err)
-		}
-
-		sigBase64, err := engine.SignPayload(cluster.SigningPrivateKey, payloadBytes)
+		checksum := keysPayload.Checksum()
+		signedMsg := BuildSignableMessage(PayloadTypeSyncKeyUpdate, cluster.ID, cluster.CurrentVersion, checksum)
+		sigBase64, err := engine.SignPayload(serverPrivKey, signedMsg)
 		if err != nil {
 			return nil, fmt.Errorf("failed signing keys payload for cluster %s: %w", cluster.Name, err)
 		}
@@ -228,9 +256,11 @@ func (s *PullService) SyncNode(ctx context.Context, node *db.ECHNode, req SyncRe
 			Version:     cluster.CurrentVersion,
 			Keys:        keysPayload,
 			Signature: &SyncSignature{
+				Type:      PayloadTypeSyncKeyUpdate,
 				Algorithm: "ed25519",
+				Checksum:  checksum,
 				SigBase64: sigBase64,
-				PublicKey: cluster.SigningPublicKey,
+				PublicKey: serverPubKey,
 			},
 		})
 		updatesAvailable = true

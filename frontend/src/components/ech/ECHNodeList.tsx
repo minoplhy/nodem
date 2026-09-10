@@ -8,6 +8,7 @@ import { AgentDeployModal } from './modals/AgentDeployModal';
 interface ECHNodeListProps {
   nodes: ECHNode[];
   controlPlaneUrl: string;
+  serverPublicKey?: string;
   onRegisterNode: () => void;
   onManageClusters: (node: ECHNode) => void;
   onDeleteNode: (node: ECHNode) => void;
@@ -16,6 +17,7 @@ interface ECHNodeListProps {
 export const ECHNodeList: React.FC<ECHNodeListProps> = ({
   nodes,
   controlPlaneUrl,
+  serverPublicKey,
   onRegisterNode,
   onManageClusters,
   onDeleteNode,
@@ -32,7 +34,7 @@ export const ECHNodeList: React.FC<ECHNodeListProps> = ({
               Independent reverse proxy nodes. A single agent instance simultaneously pulls and stages keys for all assigned clusters.
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <Button
               variant="secondary"
               size="sm"
@@ -154,6 +156,7 @@ export const ECHNodeList: React.FC<ECHNodeListProps> = ({
         open={showDeployModal}
         onClose={() => setShowDeployModal(false)}
         controlPlaneUrl={controlPlaneUrl}
+        serverPublicKey={serverPublicKey}
       />
     </>
   );

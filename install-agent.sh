@@ -8,22 +8,23 @@
 #   ./install-agent.sh [options]
 #
 # Flags:
-#   --server <url>       Central nodem server URL (e.g. http://192.168.1.50:8080)
-#   --token <token>      Edge agent authentication token
-#   --proxy <type>       Reverse proxy: nginx, caddy, haproxy, hook (default: nginx)
-#   --transport <type>   Pull transport: https or ssh (default: https)
-#   --interval <secs>    Poll interval in seconds (default: 300)
-#   --storage-dir <dir>  Directory to stage ECH files (default: /opt/ech)
-#   --init-system <sys>  Init system: auto, systemd, openrc, none (default: auto)
-#   --reload-cmd <cmd>   Custom proxy reload command override
-#   --hook <path>        Path to hook script when proxy=hook
-#   --ssh-port <port>    SSH port for ssh transport (default: 34234)
-#   --ssh-key <path>     Path to agent private key for ssh transport
-#   --bin-dest <path>    Binary target path (default: /usr/local/bin/nodem-agent)
-#   --version <tag>      Target release version (default: latest)
-#   --no-service         Skip background service registration
-#   --dry-run            Simulate operations without making changes
-#   --force              Overwrite existing binary without prompt
+#   --server <url>            Central nodem server URL (e.g. http://192.168.1.50:8080)
+#   --token <token>           Edge agent authentication token
+#   --server-public-key <key> Central server Ed25519 public key
+#   --proxy <type>            Reverse proxy: nginx, caddy, haproxy, hook (default: nginx)
+#   --transport <type>        Pull transport: https or ssh (default: https)
+#   --interval <secs>         Poll interval in seconds (default: 300)
+#   --storage-dir <dir>       Directory to stage ECH files (default: /opt/ech)
+#   --init-system <sys>       Init system: auto, systemd, openrc, none (default: auto)
+#   --reload-cmd <cmd>        Custom proxy reload command override
+#   --hook <path>             Path to hook script when proxy=hook
+#   --ssh-port <port>         SSH port for ssh transport (default: 34234)
+#   --ssh-key <path>          Path to agent private key for ssh transport
+#   --bin-dest <path>         Binary target path (default: /usr/local/bin/nodem-agent)
+#   --version <tag>           Target release version (default: latest)
+#   --no-service              Skip background service registration
+#   --dry-run                 Simulate operations without making changes
+#   --force                   Overwrite existing binary without prompt
 # ==============================================================================
 
 set -euo pipefail
@@ -31,6 +32,7 @@ set -euo pipefail
 REPO="minoplhy/nodem"
 BINARY_NAME="nodem-agent"
 SERVER=""
+SERVER_PUBLIC_KEY=""
 TOKEN=""
 PROXY="nginx"
 TRANSPORT="https"
@@ -62,40 +64,43 @@ fail()    { echo -e "${C_RED}${C_BOLD}[ERROR]${C_RESET} $*" >&2; exit 1; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --server=*)       SERVER="${1#*=}"; shift ;;
-        --server)         SERVER="$2"; shift 2 ;;
-        --token=*)        TOKEN="${1#*=}"; shift ;;
-        --token)          TOKEN="$2"; shift 2 ;;
-        --proxy=*)        PROXY="${1#*=}"; shift ;;
-        --proxy)          PROXY="$2"; shift 2 ;;
-        --transport=*)    TRANSPORT="${1#*=}"; shift ;;
-        --transport)      TRANSPORT="$2"; shift 2 ;;
-        --interval=*)     INTERVAL="${1#*=}"; shift ;;
-        --interval)       INTERVAL="$2"; shift 2 ;;
-        --storage-dir=*)  STORAGE_DIR="${1#*=}"; shift ;;
-        --storage-dir)    STORAGE_DIR="$2"; shift 2 ;;
-        --init-system=*)  INIT_SYS="${1#*=}"; shift ;;
-        --init-system)    INIT_SYS="$2"; shift 2 ;;
-        --reload-cmd=*)   RELOAD_CMD="${1#*=}"; shift ;;
-        --reload-cmd)     RELOAD_CMD="$2"; shift 2 ;;
-        --hook=*)         HOOK_SCRIPT="${1#*=}"; shift ;;
-        --hook)           HOOK_SCRIPT="$2"; shift 2 ;;
-        --ssh-port=*)     SSH_PORT="${1#*=}"; shift ;;
-        --ssh-port)       SSH_PORT="$2"; shift 2 ;;
-        --ssh-key=*)      SSH_KEY="${1#*=}"; shift ;;
-        --ssh-key)        SSH_KEY="$2"; shift 2 ;;
-        --bin-dest=*)     BIN_DEST="${1#*=}"; shift ;;
-        --bin-dest)       BIN_DEST="$2"; shift 2 ;;
-        --version=*)      TARGET_VERSION="${1#*=}"; shift ;;
-        --version)        TARGET_VERSION="$2"; shift 2 ;;
-        --no-service)     SETUP_SERVICE=false; shift ;;
-        --dry-run)        DRY_RUN=true; shift ;;
-        --force)          FORCE=true; shift ;;
+        --server=*)             SERVER="${1#*=}"; shift ;;
+        --server)               SERVER="$2"; shift 2 ;;
+        --server-public-key=*)  SERVER_PUBLIC_KEY="${1#*=}"; shift ;;
+        --server-public-key)    SERVER_PUBLIC_KEY="$2"; shift 2 ;;
+        --token=*)              TOKEN="${1#*=}"; shift ;;
+        --token)                TOKEN="$2"; shift 2 ;;
+        --proxy=*)              PROXY="${1#*=}"; shift ;;
+        --proxy)                PROXY="$2"; shift 2 ;;
+        --transport=*)          TRANSPORT="${1#*=}"; shift ;;
+        --transport)            TRANSPORT="$2"; shift 2 ;;
+        --interval=*)           INTERVAL="${1#*=}"; shift ;;
+        --interval)             INTERVAL="$2"; shift 2 ;;
+        --storage-dir=*)        STORAGE_DIR="${1#*=}"; shift ;;
+        --storage-dir)          STORAGE_DIR="$2"; shift 2 ;;
+        --init-system=*)        INIT_SYS="${1#*=}"; shift ;;
+        --init-system)          INIT_SYS="$2"; shift 2 ;;
+        --reload-cmd=*)         RELOAD_CMD="${1#*=}"; shift ;;
+        --reload-cmd)           RELOAD_CMD="$2"; shift 2 ;;
+        --hook=*)               HOOK_SCRIPT="${1#*=}"; shift ;;
+        --hook)                 HOOK_SCRIPT="$2"; shift 2 ;;
+        --ssh-port=*)           SSH_PORT="${1#*=}"; shift ;;
+        --ssh-port)             SSH_PORT="$2"; shift 2 ;;
+        --ssh-key=*)            SSH_KEY="${1#*=}"; shift ;;
+        --ssh-key)              SSH_KEY="$2"; shift 2 ;;
+        --bin-dest=*)           BIN_DEST="${1#*=}"; shift ;;
+        --bin-dest)             BIN_DEST="$2"; shift 2 ;;
+        --version=*)            TARGET_VERSION="${1#*=}"; shift ;;
+        --version)              TARGET_VERSION="$2"; shift 2 ;;
+        --no-service)           SETUP_SERVICE=false; shift ;;
+        --dry-run)              DRY_RUN=true; shift ;;
+        --force)                FORCE=true; shift ;;
         -h|--help)
-            echo "Usage: $0 --server=<url> --token=<token> [options]"
-            echo "  --server <url>       Central nodem server URL"
-            echo "  --token <token>      Edge agent authentication token"
-            echo "  --proxy <type>       Reverse proxy: nginx, caddy, haproxy, hook (default: nginx)"
+            echo "Usage: $0 --server=<url> --token=<token> --server-public-key=<key> [options]"
+            echo "  --server <url>            Central nodem server URL"
+            echo "  --token <token>           Edge agent authentication token"
+            echo "  --server-public-key <key> Central server Ed25519 public key"
+            echo "  --proxy <type>            Reverse proxy: nginx, caddy, haproxy, hook (default: nginx)"
             echo "  --transport <type>   Pull transport: https or ssh (default: https)"
             echo "  --interval <secs>    Poll interval in seconds (default: 300)"
             echo "  --storage-dir <dir>  Key storage directory (default: /opt/ech)"
@@ -183,7 +188,10 @@ if [ "${DRY_RUN}" = true ]; then
     info "[DRY-RUN] Would fetch: ${DOWNLOAD_URL}"
     info "[DRY-RUN] Would install binary to: ${BIN_DEST}"
     if [ "${SETUP_SERVICE}" = true ] && [ -n "${SERVER}" ] && [ -n "${TOKEN}" ]; then
-        info "[DRY-RUN] Would create config: /etc/nodem-agent/agent.env"
+        if [ -z "${SERVER_PUBLIC_KEY}" ]; then
+            fail "Missing required parameter: --server-public-key <key>"
+        fi
+        info "[DRY-RUN] Would create config: /etc/nodem-agent/agent.env (with server public key pinned)"
         info "[DRY-RUN] Would register and start ${RESOLVED_INIT} service 'nodem-agent'"
     elif [ "${SETUP_SERVICE}" = false ]; then
         info "[DRY-RUN] Service setup skipped (--no-service)"
@@ -245,6 +253,10 @@ success "Installed agent binary to ${BIN_DEST}"
 
 # 7. Service & Configuration Setup
 if [ "${SETUP_SERVICE}" = true ] && [ -n "${SERVER}" ] && [ -n "${TOKEN}" ]; then
+    if [ -z "${SERVER_PUBLIC_KEY}" ]; then
+        fail "Missing required parameter: --server-public-key <key>"
+    fi
+
     # Create storage and configuration directories
     mkdir -p "${STORAGE_DIR}"
     chmod 0700 "${STORAGE_DIR}"
@@ -257,6 +269,7 @@ if [ "${SETUP_SERVICE}" = true ] && [ -n "${SERVER}" ] && [ -n "${TOKEN}" ]; the
     cat << ENV > "${ENV_PATH}"
 # Automatically generated by nodem-agent installer
 ECH_SERVER=${SERVER}
+ECH_SERVER_PUBLIC_KEY=${SERVER_PUBLIC_KEY}
 ECH_TOKEN=${TOKEN}
 ECH_TRANSPORT=${TRANSPORT}
 ECH_PROXY=${PROXY}
@@ -349,10 +362,10 @@ RC
             warn "Config saved to ${ENV_PATH}. You can execute '${BIN_DEST}' directly."
         fi
     fi
-elif [ -z "${SERVER}" ] || [ -z "${TOKEN}" ]; then
-    warn "Server URL or token not passed. Binary installed at ${BIN_DEST}."
+elif [ -z "${SERVER}" ] || [ -z "${TOKEN}" ] || [ -z "${SERVER_PUBLIC_KEY}" ]; then
+    warn "Server URL, token, or server public key not passed. Binary installed at ${BIN_DEST}."
     warn "To configure and start the daemon, run:"
-    warn "  $0 --server=<URL> --token=<TOKEN> [options]"
+    warn "  $0 --server=<URL> --token=<TOKEN> --server-public-key=<KEY> [options]"
     warn "or manually configure /etc/nodem-agent/agent.env"
 fi
 
@@ -362,4 +375,7 @@ echo -e " [SUCCESS] nodem-agent deployment complete!"
 echo -e "==================================================================${C_RESET}"
 echo "Binary   : ${BIN_DEST}"
 echo "Version  : $("${BIN_DEST}" version 2>/dev/null || echo "installed")"
+if [ -n "${SERVER_PUBLIC_KEY}" ]; then
+    echo "ServerKey: ${SERVER_PUBLIC_KEY:0:24}..."
+fi
 echo "=================================================================="

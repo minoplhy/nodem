@@ -206,8 +206,9 @@ type AssignNodeRequest struct {
 }
 
 type CreateNodeResponse struct {
-	Node       *db.ECHNode `json:"node"`
-	AgentToken string      `json:"agent_token,omitempty"`
+	Node            *db.ECHNode `json:"node"`
+	AgentToken      string      `json:"agent_token,omitempty"`
+	ServerPublicKey string      `json:"server_public_key"`
 }
 
 // ListAllECHNodes handles GET /api/ech/nodes
@@ -259,9 +260,12 @@ func (s *AppState) CreateIndependentECHNode(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	serverPubKey, _, _ := s.Repo.GetOrCreateServerSigningKey(r.Context())
+
 	RespondJSON(w, http.StatusOK, CreateNodeResponse{
-		Node:       node,
-		AgentToken: rawToken,
+		Node:            node,
+		AgentToken:      rawToken,
+		ServerPublicKey: serverPubKey,
 	})
 }
 
@@ -423,9 +427,12 @@ func (s *AppState) CreateECHNode(w http.ResponseWriter, r *http.Request) {
 
 	_ = s.Repo.AssignNodeToCluster(r.Context(), id, node.ID)
 
+	serverPubKey, _, _ := s.Repo.GetOrCreateServerSigningKey(r.Context())
+
 	RespondJSON(w, http.StatusOK, CreateNodeResponse{
-		Node:       node,
-		AgentToken: rawToken,
+		Node:            node,
+		AgentToken:      rawToken,
+		ServerPublicKey: serverPubKey,
 	})
 }
 
@@ -574,4 +581,23 @@ func (s *AppState) ListECHLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondJSON(w, http.StatusOK, logs)
+}
+
+type ServerPublicKeyResponse struct {
+	ServerPublicKey string `json:"server_public_key"`
+	Algorithm       string `json:"algorithm"`
+}
+
+// GetServerPublicKey handles GET /api/ech/server-key
+func (s *AppState) GetServerPublicKey(w http.ResponseWriter, r *http.Request) {
+	serverPubKey, _, err := s.Repo.GetOrCreateServerSigningKey(r.Context())
+	if err != nil {
+		RespondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get server public key: %v", err))
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, ServerPublicKeyResponse{
+		ServerPublicKey: serverPubKey,
+		Algorithm:       "ed25519",
+	})
 }

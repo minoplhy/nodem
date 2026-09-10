@@ -139,4 +139,9 @@ type Repository interface {
 	// ECH Log Operations
 	AddECHLog(ctx context.Context, clusterID int64, nodeID, domainID *int64, eventType, message string) (*ECHLog, error)
 	ListRecentECHLogs(ctx context.Context, clusterID int64, limit int64) ([]ECHLog, error)
+
+	// System Settings Operations
+	GetSystemSetting(ctx context.Context, key string) (string, error)
+	SetSystemSetting(ctx context.Context, key, value string) error
+	GetOrCreateServerSigningKey(ctx context.Context) (pubKey, privKey string, err error)
 }

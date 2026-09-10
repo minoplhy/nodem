@@ -15,6 +15,19 @@ import (
 	"github.com/minoplhy/nodem/internal/ech/transport"
 )
 
+func createMockSignature(privKey string, pubKey string, clusterID, version int64, keys *transport.SyncKeysPayload) *transport.SyncSignature {
+	checksum := keys.Checksum()
+	msg := transport.BuildSignableMessage(transport.PayloadTypeSyncKeyUpdate, clusterID, version, checksum)
+	sigBase64, _ := engine.SignPayload(privKey, msg)
+	return &transport.SyncSignature{
+		Type:      transport.PayloadTypeSyncKeyUpdate,
+		Algorithm: "ed25519",
+		Checksum:  checksum,
+		SigBase64: sigBase64,
+		PublicKey: pubKey,
+	}
+}
+
 func TestAgentHTTPSWorkflow(t *testing.T) {
 	storageDir := t.TempDir()
 
@@ -28,16 +41,12 @@ func TestAgentHTTPSWorkflow(t *testing.T) {
 		ECHCurrentPEM:  "-----BEGIN ECHCONFIG-----\nNEW_KEY_1\n-----END ECHCONFIG-----",
 		ECHPreviousPEM: "-----BEGIN ECHCONFIG-----\nOLD_KEY_1\n-----END ECHCONFIG-----",
 	}
-	payloadBytes1, _ := json.Marshal(keys1)
-	sig1, _ := engine.SignPayload(privKey, payloadBytes1)
 
 	keys2 := &transport.SyncKeysPayload{
 		Base64ECH:      "MOCK_BASE64_ECH_2",
 		ECHCurrentPEM:  "-----BEGIN ECHCONFIG-----\nNEW_KEY_2\n-----END ECHCONFIG-----",
 		ECHPreviousPEM: "-----BEGIN ECHCONFIG-----\nOLD_KEY_2\n-----END ECHCONFIG-----",
 	}
-	payloadBytes2, _ := json.Marshal(keys2)
-	sig2, _ := engine.SignPayload(privKey, payloadBytes2)
 
 	// Mock Central Server
 	acksReceived := make(map[string]int64)
@@ -60,11 +69,7 @@ func TestAgentHTTPSWorkflow(t *testing.T) {
 						Status:      "NEW_KEY",
 						Version:     2,
 						Keys:        keys1,
-						Signature: &transport.SyncSignature{
-							Algorithm: "ed25519",
-							SigBase64: sig1,
-							PublicKey: pubKey,
-						},
+						Signature:   createMockSignature(privKey, pubKey, 1, 2, keys1),
 					},
 					{
 						ClusterID:   2,
@@ -73,11 +78,7 @@ func TestAgentHTTPSWorkflow(t *testing.T) {
 						Status:      "NEW_KEY",
 						Version:     3,
 						Keys:        keys2,
-						Signature: &transport.SyncSignature{
-							Algorithm: "ed25519",
-							SigBase64: sig2,
-							PublicKey: pubKey,
-						},
+						Signature:   createMockSignature(privKey, pubKey, 2, 3, keys2),
 					},
 				},
 			})
@@ -112,12 +113,13 @@ exit 0
 	}
 
 	cfg := AgentConfig{
-		ServerURL:   server.URL,
-		Transport:   "https",
-		Token:       "valid_token",
-		StorageDir:  storageDir,
-		ProxyType:   "hook",
-		HookScript:  hookPath,
+		ServerURL:       server.URL,
+		Transport:       "https",
+		Token:           "valid_token",
+		StorageDir:      storageDir,
+		ProxyType:       "hook",
+		HookScript:      hookPath,
+		ServerPublicKey: pubKey,
 	}
 
 	err = runSyncCycle(context.Background(), cfg)
@@ -242,8 +244,6 @@ func TestAgentHTTPSWorkflowWithSubpath(t *testing.T) {
 		ECHCurrentPEM:  "-----BEGIN ECHCONFIG-----\nNEW_KEY\n-----END ECHCONFIG-----",
 		ECHPreviousPEM: "-----BEGIN ECHCONFIG-----\nOLD_KEY\n-----END ECHCONFIG-----",
 	}
-	payloadBytes, _ := json.Marshal(keys)
-	sig, _ := engine.SignPayload(privKey, payloadBytes)
 
 	// Mock Central Server hosted on subpath /custom/monitor
 	ackReceived := false
@@ -266,11 +266,7 @@ func TestAgentHTTPSWorkflowWithSubpath(t *testing.T) {
 						Status:      "NEW_KEY",
 						Version:     3,
 						Keys:        keys,
-						Signature: &transport.SyncSignature{
-							Algorithm: "ed25519",
-							SigBase64: sig,
-							PublicKey: pubKey,
-						},
+						Signature:   createMockSignature(privKey, pubKey, 1, 3, keys),
 					},
 				},
 			})
@@ -295,12 +291,13 @@ func TestAgentHTTPSWorkflowWithSubpath(t *testing.T) {
 	defer server.Close()
 
 	cfg := AgentConfig{
-		ServerURL:  server.URL + "/custom/monitor",
-		Transport:  "https",
-		Token:      "valid_token",
-		StorageDir: storageDir,
-		ProxyType:  "nginx",
-		ReloadCmd:  "true",
+		ServerURL:       server.URL + "/custom/monitor",
+		Transport:       "https",
+		Token:           "valid_token",
+		StorageDir:      storageDir,
+		ProxyType:       "nginx",
+		ReloadCmd:       "true",
+		ServerPublicKey: pubKey,
 	}
 
 	err = runSyncCycle(context.Background(), cfg)
@@ -397,11 +394,12 @@ func TestAgentLegacyFolderMigration(t *testing.T) {
 	defer server.Close()
 
 	cfg := AgentConfig{
-		ServerURL:  server.URL,
-		Transport:  "https",
-		StorageDir: storageDir,
-		ProxyType:  "nginx",
-		ReloadCmd:  "true",
+		ServerURL:       server.URL,
+		Transport:       "https",
+		StorageDir:      storageDir,
+		ProxyType:       "nginx",
+		ReloadCmd:       "true",
+		ServerPublicKey: "mock_pub_key",
 	}
 
 	if err := runSyncCycle(context.Background(), cfg); err != nil {
@@ -435,8 +433,6 @@ func TestAgentClusterRenameResilience(t *testing.T) {
 		Base64ECH:     "KEY_ECH",
 		ECHCurrentPEM: "CURRENT_KEY",
 	}
-	payloadBytes, _ := json.Marshal(keys)
-	sig, _ := engine.SignPayload(privKey, payloadBytes)
 
 	clusterName := "Initial-Alpha-Name"
 
@@ -452,11 +448,7 @@ func TestAgentClusterRenameResilience(t *testing.T) {
 						Status:      "NEW_KEY",
 						Version:     1,
 						Keys:        keys,
-						Signature: &transport.SyncSignature{
-							Algorithm: "ed25519",
-							SigBase64: sig,
-							PublicKey: pubKey,
-						},
+						Signature:   createMockSignature(privKey, pubKey, 10, 1, keys),
 					},
 				},
 			})
@@ -471,11 +463,12 @@ func TestAgentClusterRenameResilience(t *testing.T) {
 	defer server.Close()
 
 	cfg := AgentConfig{
-		ServerURL:  server.URL,
-		Transport:  "https",
-		StorageDir: storageDir,
-		ProxyType:  "nginx",
-		ReloadCmd:  "true",
+		ServerURL:       server.URL,
+		Transport:       "https",
+		StorageDir:      storageDir,
+		ProxyType:       "nginx",
+		ReloadCmd:       "true",
+		ServerPublicKey: pubKey,
 	}
 
 	// 1. First sync with Initial-Alpha-Name
@@ -521,15 +514,11 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 		Base64ECH:     "KEY_ECH_1",
 		ECHCurrentPEM: "CURRENT_KEY_1",
 	}
-	payloadBytes1, _ := json.Marshal(keys1)
-	sig1, _ := engine.SignPayload(privKey, payloadBytes1)
 
 	keys2 := &transport.SyncKeysPayload{
 		Base64ECH:     "KEY_ECH_2",
 		ECHCurrentPEM: "CURRENT_KEY_2",
 	}
-	payloadBytes2, _ := json.Marshal(keys2)
-	sig2, _ := engine.SignPayload(privKey, payloadBytes2)
 
 	serverPhase := 1
 	var receivedAcks []transport.ClusterAckItem
@@ -548,11 +537,7 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 							Status:      "NEW_KEY",
 							Version:     1,
 							Keys:        keys1,
-							Signature: &transport.SyncSignature{
-								Algorithm: "ed25519",
-								SigBase64: sig1,
-								PublicKey: pubKey,
-							},
+							Signature:   createMockSignature(privKey, pubKey, 1, 1, keys1),
 						},
 						{
 							ClusterID:   2,
@@ -560,11 +545,7 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 							Status:      "NEW_KEY",
 							Version:     1,
 							Keys:        keys2,
-							Signature: &transport.SyncSignature{
-								Algorithm: "ed25519",
-								SigBase64: sig2,
-								PublicKey: pubKey,
-							},
+							Signature:   createMockSignature(privKey, pubKey, 2, 1, keys2),
 						},
 					},
 				})
@@ -600,11 +581,12 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 	defer server.Close()
 
 	cfg := AgentConfig{
-		ServerURL:  server.URL,
-		Transport:  "https",
-		StorageDir: storageDir,
-		ProxyType:  "nginx",
-		ReloadCmd:  "true",
+		ServerURL:       server.URL,
+		Transport:       "https",
+		StorageDir:      storageDir,
+		ProxyType:       "nginx",
+		ReloadCmd:       "true",
+		ServerPublicKey: pubKey,
 	}
 
 	// 1. Initial sync (deploy clusters 1 and 2)
@@ -717,6 +699,140 @@ func TestAgentCLIClusterCommands(t *testing.T) {
 		t.Errorf("cluster 5 still present in state after remove")
 	}
 }
+
+func TestAgentSecurityVerification(t *testing.T) {
+	pubKey, privKey, err := engine.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateSigningKeyPair failed: %v", err)
+	}
+
+	roguePubKey, roguePrivKey, err := engine.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateSigningKeyPair failed: %v", err)
+	}
+
+	keys := &transport.SyncKeysPayload{
+		Base64ECH:     "LEGIT_KEY_ECH",
+		ECHCurrentPEM: "LEGIT_PEM",
+	}
+
+	validSig := createMockSignature(privKey, pubKey, 1, 1, keys)
+
+	tests := []struct {
+		name          string
+		cfgKey        string
+		serverItem    transport.ClusterSyncItem
+		expectedErrSub string
+	}{
+		{
+			name:   "Missing pinned public key in agent config",
+			cfgKey: "",
+			serverItem: transport.ClusterSyncItem{
+				ClusterID:   1,
+				ClusterName: "test-cluster",
+				Status:      "NEW_KEY",
+				Version:     1,
+				Keys:        keys,
+				Signature:   validSig,
+			},
+			expectedErrSub: "missing required parameter: --server-public-key",
+		},
+		{
+			name:   "Missing signature in server payload",
+			cfgKey: pubKey,
+			serverItem: transport.ClusterSyncItem{
+				ClusterID:   1,
+				ClusterName: "test-cluster",
+				Status:      "NEW_KEY",
+				Version:     1,
+				Keys:        keys,
+				Signature:   nil,
+			},
+			expectedErrSub: "payload signature missing",
+		},
+		{
+			name:   "DNS Poisoning attacker signed with rogue key and sent rogue pubkey on wire",
+			cfgKey: pubKey, // Agent pinned to legit pubKey
+			serverItem: transport.ClusterSyncItem{
+				ClusterID:   1,
+				ClusterName: "test-cluster",
+				Status:      "NEW_KEY",
+				Version:     1,
+				Keys:        keys,
+				Signature:   createMockSignature(roguePrivKey, roguePubKey, 1, 1, keys),
+			},
+			expectedErrSub: "payload signature verification failed",
+		},
+		{
+			name:   "Tampered checksum in signature",
+			cfgKey: pubKey,
+			serverItem: transport.ClusterSyncItem{
+				ClusterID:   1,
+				ClusterName: "test-cluster",
+				Status:      "NEW_KEY",
+				Version:     1,
+				Keys:        keys,
+				Signature: &transport.SyncSignature{
+					Type:      transport.PayloadTypeSyncKeyUpdate,
+					Algorithm: "ed25519",
+					Checksum:  "tampered_checksum_value",
+					SigBase64: validSig.SigBase64,
+					PublicKey: pubKey,
+				},
+			},
+			expectedErrSub: "payload checksum mismatch",
+		},
+		{
+			name:   "Tampered payload data with original signature",
+			cfgKey: pubKey,
+			serverItem: transport.ClusterSyncItem{
+				ClusterID:   1,
+				ClusterName: "test-cluster",
+				Status:      "NEW_KEY",
+				Version:     1,
+				Keys: &transport.SyncKeysPayload{
+					Base64ECH:     "TAMPERED_INJECTED_KEY",
+					ECHCurrentPEM: "TAMPERED_PEM",
+				},
+				Signature: validSig, // Checksum won't match tampered keys
+			},
+			expectedErrSub: "payload checksum mismatch",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			storageDir := t.TempDir()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{tc.serverItem},
+				})
+			}))
+			defer server.Close()
+
+			cfg := AgentConfig{
+				ServerURL:       server.URL,
+				Transport:       "https",
+				StorageDir:      storageDir,
+				ProxyType:       "nginx",
+				ReloadCmd:       "true",
+				ServerPublicKey: tc.cfgKey,
+			}
+
+			err := runSyncCycle(context.Background(), cfg)
+			if err == nil {
+				t.Fatalf("expected error containing %q, but got nil", tc.expectedErrSub)
+			}
+			if !strings.Contains(err.Error(), tc.expectedErrSub) {
+				t.Fatalf("expected error containing %q, got: %v", tc.expectedErrSub, err)
+			}
+		})
+	}
+}
+
 
 
 

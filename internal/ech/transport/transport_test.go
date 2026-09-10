@@ -134,11 +134,21 @@ func TestPullServiceSyncAndAck(t *testing.T) {
 		t.Fatalf("unexpected ClusterSyncItem: %+v", cItem)
 	}
 
-	// Verify Ed25519 signature
-	payloadBytes, _ := json.Marshal(cItem.Keys)
-	verified := engine.VerifySignature(cItem.Signature.PublicKey, payloadBytes, cItem.Signature.SigBase64)
+	// Verify Server-Signed Checksum & Domain-Separated Signature
+	serverPubKey, _, err := repo.GetOrCreateServerSigningKey(ctx)
+	if err != nil {
+		t.Fatalf("failed getting server signing key: %v", err)
+	}
+	if cItem.Signature.PublicKey != serverPubKey {
+		t.Fatalf("expected server public key %s, got %s", serverPubKey, cItem.Signature.PublicKey)
+	}
+	if cItem.Signature.Checksum != cItem.Keys.Checksum() {
+		t.Fatalf("checksum mismatch: expected %s, got %s", cItem.Keys.Checksum(), cItem.Signature.Checksum)
+	}
+	signedMsg := transport.BuildSignableMessage(cItem.Signature.Type, cItem.ClusterID, cItem.Version, cItem.Signature.Checksum)
+	verified := engine.VerifySignature(serverPubKey, signedMsg, cItem.Signature.SigBase64)
 	if !verified {
-		t.Fatalf("failed to verify ed25519 signature on sync keys payload")
+		t.Fatalf("failed to verify server ed25519 signature on sync keys payload")
 	}
 
 	// 2. Ack version 1
@@ -367,6 +377,107 @@ func TestPullServiceSyncNodeDetectsRemovedClusters(t *testing.T) {
 	}
 	if err := service.AckNode(ctx, node, ackReq, "127.0.0.1"); err != nil {
 		t.Fatalf("AckNode failed on REMOVED: %v", err)
+	}
+}
+
+func TestServerSignedChecksum_SecuritySuite(t *testing.T) {
+	ctx := context.Background()
+	repo, err := sqlite.New(filepath.Join(t.TempDir(), "security_test.db"))
+	if err != nil {
+		t.Fatalf("failed creating sqlite repo: %v", err)
+	}
+	defer repo.Close()
+
+	if err := repo.InitDB(ctx); err != nil {
+		t.Fatalf("failed initializing db: %v", err)
+	}
+
+	user, err := repo.CreateUser(ctx, "sec_admin", "hash", "ADMIN")
+	if err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+
+	pubKey, privKey, _ := engine.GenerateSigningKeyPair()
+	cluster, err := repo.CreateECHCluster(ctx, user.ID, "Sec Cluster", "cover.sec.com", "x25519,hkdf-sha256,aes-128-gcm", 64, 168, true, pubKey, privKey)
+	if err != nil {
+		t.Fatalf("CreateECHCluster failed: %v", err)
+	}
+
+	_, err = repo.SaveNewECHKey(ctx, cluster.ID, 1, "base64ech", "privkeypem", "configpem", "fullpem")
+	if err != nil {
+		t.Fatalf("SaveNewECHKey failed: %v", err)
+	}
+	_, _ = repo.IncrementClusterVersion(ctx, cluster.ID, time.Now(), time.Now().Add(168*time.Hour))
+
+	tokenHash := transport.HashAgentToken("sec-token")
+	node, err := repo.CreateECHNode(ctx, user.ID, "sec-edge", db.PullTransportHTTPS, &tokenHash, nil, "NGINX")
+	if err != nil {
+		t.Fatalf("CreateECHNode failed: %v", err)
+	}
+	_ = repo.AssignNodeToCluster(ctx, cluster.ID, node.ID)
+
+	service := transport.NewPullService(repo)
+
+	// Fetch server key (this is the pinned key that edge agents hold)
+	pinnedServerPubKey, _, err := repo.GetOrCreateServerSigningKey(ctx)
+	if err != nil {
+		t.Fatalf("GetOrCreateServerSigningKey failed: %v", err)
+	}
+
+	syncResp, err := service.SyncNode(ctx, node, transport.SyncRequest{}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("SyncNode failed: %v", err)
+	}
+	if len(syncResp.Clusters) != 1 {
+		t.Fatalf("expected 1 cluster, got %d", len(syncResp.Clusters))
+	}
+	item := syncResp.Clusters[0]
+
+	// 1. Valid signature & checksum verification succeeds
+	if item.Signature.Checksum != item.Keys.Checksum() {
+		t.Fatalf("expected checksum match")
+	}
+	validMsg := transport.BuildSignableMessage(item.Signature.Type, item.ClusterID, item.Version, item.Signature.Checksum)
+	if !engine.VerifySignature(pinnedServerPubKey, validMsg, item.Signature.SigBase64) {
+		t.Fatalf("valid signature failed verification against pinned server public key")
+	}
+
+	// 2. Tampered Key data detected by checksum
+	tamperedKeys := *item.Keys
+	tamperedKeys.PrivateKeyPEM = "tampered_evil_private_key"
+	if tamperedKeys.Checksum() == item.Signature.Checksum {
+		t.Fatalf("expected tampered keys to produce different checksum")
+	}
+
+	// 3. Domain separation / PayloadType tampering fails signature
+	wrongTypeMsg := transport.BuildSignableMessage("FORGED_TYPE", item.ClusterID, item.Version, item.Signature.Checksum)
+	if engine.VerifySignature(pinnedServerPubKey, wrongTypeMsg, item.Signature.SigBase64) {
+		t.Fatalf("signature verification should have failed with forged payload type")
+	}
+
+	// 4. Cross-cluster or version replay tampering fails signature
+	wrongClusterMsg := transport.BuildSignableMessage(item.Signature.Type, 9999, item.Version, item.Signature.Checksum)
+	if engine.VerifySignature(pinnedServerPubKey, wrongClusterMsg, item.Signature.SigBase64) {
+		t.Fatalf("signature verification should have failed with mismatched cluster ID")
+	}
+	wrongVersionMsg := transport.BuildSignableMessage(item.Signature.Type, item.ClusterID, 9999, item.Signature.Checksum)
+	if engine.VerifySignature(pinnedServerPubKey, wrongVersionMsg, item.Signature.SigBase64) {
+		t.Fatalf("signature verification should have failed with mismatched version")
+	}
+
+	// 5. DNS Poisoning / Rogue Server simulation:
+	// Attacker controls the server, signs with attacker's private key, and supplies attacker's public key in the payload.
+	roguePub, roguePriv, _ := engine.GenerateSigningKeyPair()
+	rogueSig, _ := engine.SignPayload(roguePriv, validMsg)
+
+	// If the agent verifies against the rogue public key sent over the wire (the old vulnerability):
+	if !engine.VerifySignature(roguePub, validMsg, rogueSig) {
+		t.Fatalf("rogue signature should be self-consistent with rogue key")
+	}
+
+	// But when the agent enforces its PINNED server public key (our mitigation):
+	if engine.VerifySignature(pinnedServerPubKey, validMsg, rogueSig) {
+		t.Fatalf("CRITICAL: Pinned server public key must reject rogue signature from spoofed server!")
 	}
 }
 

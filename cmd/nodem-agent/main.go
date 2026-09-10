@@ -26,19 +26,20 @@ import (
 )
 
 type AgentConfig struct {
-	ServerURL    string
-	Transport    string // "https" or "ssh"
-	Token        string
-	SSHPort      uint16
-	SSHKeyPath   string
-	StorageDir   string
-	ProxyType    string // "nginx", "caddy", "haproxy", "hook"
-	ReloadCmd    string
-	HookScript   string
-	IntervalSecs int
-	Once         bool
-	DryRun       bool
-	InitSystem   string // "auto", "systemd", "openrc"
+	ServerURL       string
+	ServerPublicKey string
+	Transport       string // "https" or "ssh"
+	Token           string
+	SSHPort         uint16
+	SSHKeyPath      string
+	StorageDir      string
+	ProxyType       string // "nginx", "caddy", "haproxy", "hook"
+	ReloadCmd       string
+	HookScript      string
+	IntervalSecs    int
+	Once            bool
+	DryRun          bool
+	InitSystem      string // "auto", "systemd", "openrc"
 }
 
 type ClusterState struct {
@@ -91,6 +92,7 @@ func main() {
 	var cfg AgentConfig
 
 	flag.StringVar(&cfg.ServerURL, "server", getEnv("ECH_SERVER", "http://localhost:8080"), "Central server URL or host")
+	flag.StringVar(&cfg.ServerPublicKey, "server-public-key", getEnv("ECH_SERVER_PUBLIC_KEY", ""), "Central server public key")
 	flag.StringVar(&cfg.Transport, "transport", getEnv("ECH_TRANSPORT", "https"), "Pull transport: 'https' or 'ssh'")
 	flag.StringVar(&cfg.Token, "token", getEnv("ECH_TOKEN", ""), "Agent authentication secret token")
 	var sshPortInt int
@@ -109,6 +111,11 @@ func main() {
 	cfg.SSHPort = uint16(sshPortInt)
 	cfg.Transport = strings.ToLower(strings.TrimSpace(cfg.Transport))
 	cfg.ProxyType = strings.ToLower(strings.TrimSpace(cfg.ProxyType))
+
+	if strings.TrimSpace(cfg.ServerPublicKey) == "" {
+		fmt.Fprintln(os.Stderr, "Error: missing required parameter: --server-public-key (or ECH_SERVER_PUBLIC_KEY)")
+		os.Exit(1)
+	}
 
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
 	slog.SetDefault(slog.New(handler))
@@ -287,16 +294,29 @@ func runSyncCycle(ctx context.Context, cfg AgentConfig) error {
 	var newClusters []transport.ClusterSyncItem
 	for _, c := range resp.Clusters {
 		if c.Status == "NEW_KEY" && c.Keys != nil {
-			// Verify Ed25519 signature if provided
-			if c.Signature != nil && c.Signature.PublicKey != "" {
-				payloadBytes, err := json.Marshal(c.Keys)
-				if err == nil {
-					if !engine.VerifySignature(c.Signature.PublicKey, payloadBytes, c.Signature.SigBase64) {
-						return fmt.Errorf("SECURITY ALERT: Ed25519 signature verification failed for cluster %d (%s)! Refusing to deploy", c.ClusterID, c.ClusterName)
-					}
-					slog.Info("Payload Ed25519 signature verified successfully", "cluster_id", c.ClusterID, "cluster", c.ClusterName)
-				}
+			if cfg.ServerPublicKey == "" {
+				return fmt.Errorf("missing required parameter: --server-public-key (or ECH_SERVER_PUBLIC_KEY)")
 			}
+			if c.Signature == nil || c.Signature.Checksum == "" || c.Signature.SigBase64 == "" {
+				return fmt.Errorf("payload signature missing for cluster %d (%s)", c.ClusterID, c.ClusterName)
+			}
+
+			computedChecksum := c.Keys.Checksum()
+			if computedChecksum != c.Signature.Checksum {
+				return fmt.Errorf("payload checksum mismatch for cluster %d (%s)", c.ClusterID, c.ClusterName)
+			}
+
+			payloadType := c.Signature.Type
+			if payloadType == "" {
+				payloadType = transport.PayloadTypeSyncKeyUpdate
+			}
+			signedMessage := transport.BuildSignableMessage(payloadType, c.ClusterID, c.Version, c.Signature.Checksum)
+
+			if !engine.VerifySignature(cfg.ServerPublicKey, signedMessage, c.Signature.SigBase64) {
+				return fmt.Errorf("payload signature verification failed for cluster %d (%s)", c.ClusterID, c.ClusterName)
+			}
+
+			slog.Info("Payload signature and checksum verified", "cluster_id", c.ClusterID, "cluster", c.ClusterName, "type", payloadType)
 			newClusters = append(newClusters, c)
 		}
 	}

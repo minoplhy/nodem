@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { fn, API_URL, BASE_PATH } from '../core';
-import type { ECHCluster, ECHNode, ECHClusterNode, ECHDomain, ECHLog, DnsProviderConfig, TargetGroup } from '../core';
+import type { ECHCluster, ECHNode, ECHClusterNode, ECHDomain, ECHLog, DnsProviderConfig, TargetGroup, ServerPublicKeyInfo } from '../core';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Button } from '../components/ui/Button';
 import { Tabs } from '../components/ui/Tabs';
@@ -51,6 +51,7 @@ export const ECH: React.FC = () => {
   const [logs, setLogs] = useState<ECHLog[]>([]);
   const [providers, setProviders] = useState<DnsProviderConfig[]>([]);
   const [groups, setGroups] = useState<TargetGroup[]>([]);
+  const [serverKeyInfo, setServerKeyInfo] = useState<ServerPublicKeyInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [rotating, setRotating] = useState(false);
 
@@ -68,6 +69,7 @@ export const ECH: React.FC = () => {
   const [revealedToken, setRevealedToken] = useState<string>('');
   const [revealedNodeName, setRevealedNodeName] = useState<string>('');
   const [revealedProxyType, setRevealedProxyType] = useState<string>('nginx');
+  const [revealedServerPublicKey, setRevealedServerPublicKey] = useState<string>('');
 
   const [showManageClustersModal, setShowManageClustersModal] = useState(false);
   const [managingNode, setManagingNode] = useState<ECHNode | null>(null);
@@ -126,6 +128,11 @@ export const ECH: React.FC = () => {
     fn(`${API_URL}/groups`)
       .then((r) => r.ok && r.json())
       .then((data) => setGroups(Array.isArray(data) ? data : []))
+      .catch(() => {});
+
+    fn(`${API_URL}/ech/server-key`)
+      .then((r) => r.ok && r.json())
+      .then((data) => setServerKeyInfo(data))
       .catch(() => {});
   }, []);
 
@@ -247,7 +254,7 @@ export const ECH: React.FC = () => {
     setShowNodeModal(true);
   };
 
-  const handleNodeRegistered = (nodeName: string, token?: string, proxyType?: string) => {
+  const handleNodeRegistered = (nodeName: string, token?: string, proxyType?: string, serverPubKey?: string) => {
     fetchNodes();
     if (activeClusterId) fetchClusterDetails(activeClusterId);
 
@@ -255,6 +262,7 @@ export const ECH: React.FC = () => {
       setRevealedToken(token);
       setRevealedNodeName(nodeName);
       setRevealedProxyType(proxyType || 'nginx');
+      setRevealedServerPublicKey(serverPubKey || serverKeyInfo?.server_public_key || '');
       setShowTokenModal(true);
     }
   };
@@ -434,6 +442,7 @@ export const ECH: React.FC = () => {
         <ECHNodeList
           nodes={allNodes}
           controlPlaneUrl={controlPlaneUrl}
+          serverPublicKey={serverKeyInfo?.server_public_key}
           onRegisterNode={() => handleOpenRegisterNode()}
           onManageClusters={handleOpenManageClusters}
           onDeleteNode={handleDeleteNode}
@@ -561,6 +570,7 @@ export const ECH: React.FC = () => {
         nodeName={revealedNodeName}
         proxyType={revealedProxyType}
         controlPlaneUrl={controlPlaneUrl}
+        serverPublicKey={revealedServerPublicKey || serverKeyInfo?.server_public_key}
         onClose={() => setShowTokenModal(false)}
       />
 

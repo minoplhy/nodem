@@ -7,12 +7,14 @@ interface AgentDeployModalProps {
   open: boolean;
   onClose: () => void;
   controlPlaneUrl: string;
+  serverPublicKey?: string;
 }
 
 export const AgentDeployModal: React.FC<AgentDeployModalProps> = ({
   open,
   onClose,
   controlPlaneUrl,
+  serverPublicKey,
 }) => {
   return (
     <Modal open={open} title="Edge Agent Setup Guide" onClose={onClose}>
@@ -23,6 +25,7 @@ export const AgentDeployModal: React.FC<AgentDeployModalProps> = ({
 
         <AgentDeployGuide
           controlPlaneUrl={controlPlaneUrl}
+          serverPublicKey={serverPublicKey}
           allowProxySelection={true}
         />
 
