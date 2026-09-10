@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/minoplhy/nodem/internal/db"
 	"github.com/minoplhy/nodem/internal/ech/engine"
@@ -31,7 +33,10 @@ type SyncRequest struct {
 	Clusters  map[string]int64 `json:"clusters,omitempty"` // map of cluster_name -> local applied version
 }
 
-const PayloadTypeSyncKeyUpdate = "SYNC_KEY_UPDATE"
+const (
+	PayloadTypeSyncKeyUpdate = "SYNC_KEY_UPDATE"
+	PayloadTypeSyncPayload   = "SYNC_PAYLOAD"
+)
 
 // BuildSignableMessage creates a canonical domain-separated message digest string.
 func BuildSignableMessage(payloadType string, clusterID, version int64, checksum string) []byte {
@@ -83,11 +88,64 @@ type ClusterSyncItem struct {
 }
 
 type SyncResponse struct {
+	NodeID            int64             `json:"node_id,omitempty"`
 	Status            string            `json:"status"` // "UP_TO_DATE" or "UPDATES_AVAILABLE"
 	Clusters          []ClusterSyncItem `json:"clusters"`
 	RemovedClusterIDs []int64           `json:"removed_cluster_ids,omitempty"`
 	RemovedClusters   []string          `json:"removed_clusters,omitempty"`
+	Timestamp         int64             `json:"timestamp"`
 	Message           string            `json:"message,omitempty"`
+	Signature         *SyncSignature    `json:"signature,omitempty"`
+}
+
+// PayloadChecksum computes a deterministic SHA-256 hex digest over the entire sync payload content.
+func (r *SyncResponse) PayloadChecksum() string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("NODE_ID:%d\n", r.NodeID))
+	b.WriteString(fmt.Sprintf("STATUS:%s\n", r.Status))
+	b.WriteString(fmt.Sprintf("TIMESTAMP:%d\n", r.Timestamp))
+
+	// Sort clusters canonically by ClusterID ascending, then ClusterName ascending
+	sortedClusters := make([]ClusterSyncItem, len(r.Clusters))
+	copy(sortedClusters, r.Clusters)
+	sort.Slice(sortedClusters, func(i, j int) bool {
+		if sortedClusters[i].ClusterID != sortedClusters[j].ClusterID {
+			return sortedClusters[i].ClusterID < sortedClusters[j].ClusterID
+		}
+		return sortedClusters[i].ClusterName < sortedClusters[j].ClusterName
+	})
+
+	for _, c := range sortedClusters {
+		b.WriteString(fmt.Sprintf("CLUSTER:%d:%s:%s:%s:%d\n", c.ClusterID, c.ClusterName, c.PublicName, c.Status, c.Version))
+		if c.Keys != nil {
+			b.WriteString("KEY_ECH:" + c.Keys.Base64ECH + "\n")
+			b.WriteString("KEY_CURRENT_PEM:" + c.Keys.ECHCurrentPEM + "\n")
+			b.WriteString("KEY_PRIVATE_PEM:" + c.Keys.PrivateKeyPEM + "\n")
+			b.WriteString("KEY_CONFIG_PEM:" + c.Keys.ECHConfigPEM + "\n")
+			b.WriteString("KEY_PREVIOUS_PEM:" + c.Keys.ECHPreviousPEM + "\n")
+		}
+	}
+
+	// Sort removed cluster IDs ascending
+	sortedRemovedIDs := make([]int64, len(r.RemovedClusterIDs))
+	copy(sortedRemovedIDs, r.RemovedClusterIDs)
+	sort.Slice(sortedRemovedIDs, func(i, j int) bool {
+		return sortedRemovedIDs[i] < sortedRemovedIDs[j]
+	})
+	for _, id := range sortedRemovedIDs {
+		b.WriteString(fmt.Sprintf("REMOVED_ID:%d\n", id))
+	}
+
+	// Sort removed clusters alphabetically
+	sortedRemovedNames := make([]string, len(r.RemovedClusters))
+	copy(sortedRemovedNames, r.RemovedClusters)
+	sort.Strings(sortedRemovedNames)
+	for _, name := range sortedRemovedNames {
+		b.WriteString(fmt.Sprintf("REMOVED_NAME:%s\n", name))
+	}
+
+	h := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(h[:])
 }
 
 type ClusterAckItem struct {
@@ -177,93 +235,88 @@ func (s *PullService) SyncNode(ctx context.Context, node *db.ECHNode, req SyncRe
 		}
 	}
 
-	if len(clusters) == 0 {
-		status := "UP_TO_DATE"
-		if len(removedClusterIDs) > 0 || len(removedClusters) > 0 {
-			status = "UPDATES_AVAILABLE"
-		}
-		return &SyncResponse{
-			Status:            status,
-			Clusters:          []ClusterSyncItem{},
-			RemovedClusterIDs: removedClusterIDs,
-			RemovedClusters:   removedClusters,
-			Message:           "No clusters assigned to this node",
-		}, nil
-	}
-
-	items := make([]ClusterSyncItem, 0, len(clusters))
-	updatesAvailable := len(removedClusterIDs) > 0 || len(removedClusters) > 0
-
 	serverPubKey, serverPrivKey, err := s.repo.GetOrCreateServerSigningKey(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed retrieving server signing key: %w", err)
 	}
 
-	for _, cluster := range clusters {
-		localVersion, hasVersion := req.Clusters[fmt.Sprintf("%d", cluster.ID)]
-		if !hasVersion {
-			localVersion = req.Clusters[cluster.Name]
-		}
+	var items []ClusterSyncItem
+	var msg string
+	updatesAvailable := len(removedClusterIDs) > 0 || len(removedClusters) > 0
 
-		if localVersion == cluster.CurrentVersion && cluster.CurrentVersion > 0 {
+	if len(clusters) == 0 {
+		items = []ClusterSyncItem{}
+		msg = "No clusters assigned to this node"
+	} else {
+		items = make([]ClusterSyncItem, 0, len(clusters))
+		msg = fmt.Sprintf("Synchronized %d clusters", len(clusters))
+
+		for _, cluster := range clusters {
+			localVersion, hasVersion := req.Clusters[fmt.Sprintf("%d", cluster.ID)]
+			if !hasVersion {
+				localVersion = req.Clusters[cluster.Name]
+			}
+
+			if localVersion == cluster.CurrentVersion && cluster.CurrentVersion > 0 {
+				items = append(items, ClusterSyncItem{
+					ClusterID:   cluster.ID,
+					ClusterName: cluster.Name,
+					PublicName:  cluster.PublicName,
+					Status:      "UP_TO_DATE",
+					Version:     cluster.CurrentVersion,
+				})
+				continue
+			}
+
+			activeKey, err := s.repo.GetActiveECHKey(ctx, cluster.ID)
+			if err != nil || activeKey == nil {
+				// No active key generated yet for this cluster
+				items = append(items, ClusterSyncItem{
+					ClusterID:   cluster.ID,
+					ClusterName: cluster.Name,
+					PublicName:  cluster.PublicName,
+					Status:      "UP_TO_DATE",
+					Version:     0,
+				})
+				continue
+			}
+
+			prevKey, _ := s.repo.GetPreviousECHKey(ctx, cluster.ID)
+
+			keysPayload := &SyncKeysPayload{
+				Base64ECH:     activeKey.Base64ECH,
+				ECHCurrentPEM: activeKey.FullPEM,
+				PrivateKeyPEM: activeKey.PrivateKeyPEM,
+				ECHConfigPEM:  activeKey.ECHConfigPEM,
+			}
+			if prevKey != nil {
+				keysPayload.ECHPreviousPEM = prevKey.FullPEM
+			}
+
+			checksum := keysPayload.Checksum()
+			signedMsg := BuildSignableMessage(PayloadTypeSyncKeyUpdate, cluster.ID, cluster.CurrentVersion, checksum)
+			sigBase64, err := engine.SignPayload(serverPrivKey, signedMsg)
+			if err != nil {
+				return nil, fmt.Errorf("failed signing keys payload for cluster %s: %w", cluster.Name, err)
+			}
+
 			items = append(items, ClusterSyncItem{
 				ClusterID:   cluster.ID,
 				ClusterName: cluster.Name,
 				PublicName:  cluster.PublicName,
-				Status:      "UP_TO_DATE",
+				Status:      "NEW_KEY",
 				Version:     cluster.CurrentVersion,
+				Keys:        keysPayload,
+				Signature: &SyncSignature{
+					Type:      PayloadTypeSyncKeyUpdate,
+					Algorithm: "ed25519",
+					Checksum:  checksum,
+					SigBase64: sigBase64,
+					PublicKey: serverPubKey,
+				},
 			})
-			continue
+			updatesAvailable = true
 		}
-
-		activeKey, err := s.repo.GetActiveECHKey(ctx, cluster.ID)
-		if err != nil || activeKey == nil {
-			// No active key generated yet for this cluster
-			items = append(items, ClusterSyncItem{
-				ClusterID:   cluster.ID,
-				ClusterName: cluster.Name,
-				PublicName:  cluster.PublicName,
-				Status:      "UP_TO_DATE",
-				Version:     0,
-			})
-			continue
-		}
-
-		prevKey, _ := s.repo.GetPreviousECHKey(ctx, cluster.ID)
-
-		keysPayload := &SyncKeysPayload{
-			Base64ECH:     activeKey.Base64ECH,
-			ECHCurrentPEM: activeKey.FullPEM,
-			PrivateKeyPEM: activeKey.PrivateKeyPEM,
-			ECHConfigPEM:  activeKey.ECHConfigPEM,
-		}
-		if prevKey != nil {
-			keysPayload.ECHPreviousPEM = prevKey.FullPEM
-		}
-
-		checksum := keysPayload.Checksum()
-		signedMsg := BuildSignableMessage(PayloadTypeSyncKeyUpdate, cluster.ID, cluster.CurrentVersion, checksum)
-		sigBase64, err := engine.SignPayload(serverPrivKey, signedMsg)
-		if err != nil {
-			return nil, fmt.Errorf("failed signing keys payload for cluster %s: %w", cluster.Name, err)
-		}
-
-		items = append(items, ClusterSyncItem{
-			ClusterID:   cluster.ID,
-			ClusterName: cluster.Name,
-			PublicName:  cluster.PublicName,
-			Status:      "NEW_KEY",
-			Version:     cluster.CurrentVersion,
-			Keys:        keysPayload,
-			Signature: &SyncSignature{
-				Type:      PayloadTypeSyncKeyUpdate,
-				Algorithm: "ed25519",
-				Checksum:  checksum,
-				SigBase64: sigBase64,
-				PublicKey: serverPubKey,
-			},
-		})
-		updatesAvailable = true
 	}
 
 	overallStatus := "UP_TO_DATE"
@@ -271,13 +324,32 @@ func (s *PullService) SyncNode(ctx context.Context, node *db.ECHNode, req SyncRe
 		overallStatus = "UPDATES_AVAILABLE"
 	}
 
-	return &SyncResponse{
+	resp := &SyncResponse{
+		NodeID:            node.ID,
 		Status:            overallStatus,
 		Clusters:          items,
 		RemovedClusterIDs: removedClusterIDs,
 		RemovedClusters:   removedClusters,
-		Message:           fmt.Sprintf("Synchronized %d clusters", len(items)),
-	}, nil
+		Timestamp:         time.Now().UTC().Unix(),
+		Message:           msg,
+	}
+
+	checksum := resp.PayloadChecksum()
+	signedMsg := BuildSignableMessage(PayloadTypeSyncPayload, resp.NodeID, resp.Timestamp, checksum)
+	sigBase64, err := engine.SignPayload(serverPrivKey, signedMsg)
+	if err != nil {
+		return nil, fmt.Errorf("failed signing sync response: %w", err)
+	}
+
+	resp.Signature = &SyncSignature{
+		Type:      PayloadTypeSyncPayload,
+		Algorithm: "ed25519",
+		Checksum:  checksum,
+		SigBase64: sigBase64,
+		PublicKey: serverPubKey,
+	}
+
+	return resp, nil
 }
 
 // AckNode processes multi-cluster acknowledgment reports from an edge node.

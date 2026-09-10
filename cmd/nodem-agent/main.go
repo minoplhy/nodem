@@ -50,7 +50,8 @@ type ClusterState struct {
 }
 
 type AgentState struct {
-	Clusters map[string]ClusterState `json:"clusters"`
+	Clusters          map[string]ClusterState `json:"clusters"`
+	LastSyncTimestamp int64                   `json:"last_sync_timestamp,omitempty"`
 }
 
 func ClusterDirName(clusterID int64) string {
@@ -242,6 +243,33 @@ func runSyncCycle(ctx context.Context, cfg AgentConfig) error {
 		return fmt.Errorf("pull failed: %w", err)
 	}
 
+	// 1. Enforce pinned server public key presence
+	if cfg.ServerPublicKey == "" {
+		return fmt.Errorf("missing required parameter: --server-public-key (or ECH_SERVER_PUBLIC_KEY)")
+	}
+
+	// 2. Full sync response payload signature & checksum verification
+	if resp.Signature == nil || resp.Signature.SigBase64 == "" || resp.Signature.Checksum == "" {
+		return fmt.Errorf("sync response signature missing")
+	}
+
+	computedPayloadChecksum := resp.PayloadChecksum()
+	if computedPayloadChecksum != resp.Signature.Checksum {
+		return fmt.Errorf("sync response payload checksum mismatch")
+	}
+
+	signedPayloadMsg := transport.BuildSignableMessage(transport.PayloadTypeSyncPayload, resp.NodeID, resp.Timestamp, resp.Signature.Checksum)
+	if !engine.VerifySignature(cfg.ServerPublicKey, signedPayloadMsg, resp.Signature.SigBase64) {
+		return fmt.Errorf("sync response signature verification failed")
+	}
+
+	// 3. Stale or replayed response detection
+	if resp.Timestamp > 0 && localState.LastSyncTimestamp > 0 && resp.Timestamp < localState.LastSyncTimestamp-30 {
+		return fmt.Errorf("stale or replayed sync response detected (server timestamp %d < local %d)", resp.Timestamp, localState.LastSyncTimestamp)
+	}
+
+	slog.Info("Sync response signature and payload verified", "node_id", resp.NodeID, "timestamp", resp.Timestamp, "clusters", len(resp.Clusters))
+
 	// Migrate any legacy name-based directories or state entries
 	if migrateLegacyClusterFolders(cfg.StorageDir, &localState, resp.Clusters) {
 		_ = saveLocalState(stateFile, localState)
@@ -323,6 +351,10 @@ func runSyncCycle(ctx context.Context, cfg AgentConfig) error {
 
 	if len(newClusters) == 0 && len(clustersToRemoveMap) == 0 {
 		slog.Info("All assigned ECH clusters are up to date.")
+		if resp.Timestamp > localState.LastSyncTimestamp {
+			localState.LastSyncTimestamp = resp.Timestamp
+			_ = saveLocalState(stateFile, localState)
+		}
 		return nil
 	}
 
@@ -436,6 +468,9 @@ func runSyncCycle(ctx context.Context, cfg AgentConfig) error {
 				LastSyncTime:   now,
 			}
 		}
+	}
+	if resp.Timestamp > localState.LastSyncTimestamp {
+		localState.LastSyncTimestamp = resp.Timestamp
 	}
 	_ = saveLocalState(stateFile, localState)
 

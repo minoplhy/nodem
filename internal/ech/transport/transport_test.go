@@ -433,7 +433,7 @@ func TestServerSignedChecksum_SecuritySuite(t *testing.T) {
 	}
 	item := syncResp.Clusters[0]
 
-	// 1. Valid signature & checksum verification succeeds
+	// 1. Valid key signature & checksum verification succeeds
 	if item.Signature.Checksum != item.Keys.Checksum() {
 		t.Fatalf("expected checksum match")
 	}
@@ -442,20 +442,70 @@ func TestServerSignedChecksum_SecuritySuite(t *testing.T) {
 		t.Fatalf("valid signature failed verification against pinned server public key")
 	}
 
-	// 2. Tampered Key data detected by checksum
+	// 2. Full SyncResponse Root Payload signature & checksum verification succeeds
+	if syncResp.Signature == nil {
+		t.Fatalf("expected non-nil syncResp.Signature")
+	}
+	if syncResp.Signature.Type != transport.PayloadTypeSyncPayload {
+		t.Fatalf("expected signature type %s, got %s", transport.PayloadTypeSyncPayload, syncResp.Signature.Type)
+	}
+	if syncResp.Signature.Checksum != syncResp.PayloadChecksum() {
+		t.Fatalf("expected payload checksum match")
+	}
+	validPayloadMsg := transport.BuildSignableMessage(transport.PayloadTypeSyncPayload, syncResp.NodeID, syncResp.Timestamp, syncResp.Signature.Checksum)
+	if !engine.VerifySignature(pinnedServerPubKey, validPayloadMsg, syncResp.Signature.SigBase64) {
+		t.Fatalf("valid full payload signature failed verification against pinned server public key")
+	}
+
+	// 3. Full Payload Content Tampering Detection:
+	// (a) Tampering with RemovedClusterIDs changes PayloadChecksum
+	tamperedResp := *syncResp
+	tamperedResp.RemovedClusterIDs = []int64{999}
+	if tamperedResp.PayloadChecksum() == syncResp.Signature.Checksum {
+		t.Fatalf("expected tampered RemovedClusterIDs to break payload checksum")
+	}
+
+	// (b) Tampering with Status changes PayloadChecksum
+	tamperedStatus := *syncResp
+	tamperedStatus.Status = "FORGED_STATUS"
+	if tamperedStatus.PayloadChecksum() == syncResp.Signature.Checksum {
+		t.Fatalf("expected tampered Status to break payload checksum")
+	}
+
+	// (c) Tampering with cluster PublicName changes PayloadChecksum
+	tamperedClusters := []transport.ClusterSyncItem{syncResp.Clusters[0]}
+	tamperedClusters[0].PublicName = "attacker-domain.com"
+	tamperedClusterResp := *syncResp
+	tamperedClusterResp.Clusters = tamperedClusters
+	if tamperedClusterResp.PayloadChecksum() == syncResp.Signature.Checksum {
+		t.Fatalf("expected tampered PublicName to break payload checksum")
+	}
+
+	// (d) Tampering with ECH key PEM changes PayloadChecksum
+	tamperedPEMKeys := *syncResp.Clusters[0].Keys
+	tamperedPEMKeys.ECHCurrentPEM = "INJECTED_KEY"
+	tamperedPEMClusters := []transport.ClusterSyncItem{syncResp.Clusters[0]}
+	tamperedPEMClusters[0].Keys = &tamperedPEMKeys
+	tamperedPEMResp := *syncResp
+	tamperedPEMResp.Clusters = tamperedPEMClusters
+	if tamperedPEMResp.PayloadChecksum() == syncResp.Signature.Checksum {
+		t.Fatalf("expected tampered ECHCurrentPEM to break payload checksum")
+	}
+
+	// 4. Tampered Key data detected by individual item checksum
 	tamperedKeys := *item.Keys
 	tamperedKeys.PrivateKeyPEM = "tampered_evil_private_key"
 	if tamperedKeys.Checksum() == item.Signature.Checksum {
 		t.Fatalf("expected tampered keys to produce different checksum")
 	}
 
-	// 3. Domain separation / PayloadType tampering fails signature
+	// 5. Domain separation / PayloadType tampering fails signature
 	wrongTypeMsg := transport.BuildSignableMessage("FORGED_TYPE", item.ClusterID, item.Version, item.Signature.Checksum)
 	if engine.VerifySignature(pinnedServerPubKey, wrongTypeMsg, item.Signature.SigBase64) {
 		t.Fatalf("signature verification should have failed with forged payload type")
 	}
 
-	// 4. Cross-cluster or version replay tampering fails signature
+	// 6. Cross-cluster or version replay tampering fails signature
 	wrongClusterMsg := transport.BuildSignableMessage(item.Signature.Type, 9999, item.Version, item.Signature.Checksum)
 	if engine.VerifySignature(pinnedServerPubKey, wrongClusterMsg, item.Signature.SigBase64) {
 		t.Fatalf("signature verification should have failed with mismatched cluster ID")
@@ -465,18 +515,18 @@ func TestServerSignedChecksum_SecuritySuite(t *testing.T) {
 		t.Fatalf("signature verification should have failed with mismatched version")
 	}
 
-	// 5. DNS Poisoning / Rogue Server simulation:
+	// 7. DNS Poisoning / Rogue Server simulation:
 	// Attacker controls the server, signs with attacker's private key, and supplies attacker's public key in the payload.
 	roguePub, roguePriv, _ := engine.GenerateSigningKeyPair()
-	rogueSig, _ := engine.SignPayload(roguePriv, validMsg)
+	rogueSig, _ := engine.SignPayload(roguePriv, validPayloadMsg)
 
 	// If the agent verifies against the rogue public key sent over the wire (the old vulnerability):
-	if !engine.VerifySignature(roguePub, validMsg, rogueSig) {
+	if !engine.VerifySignature(roguePub, validPayloadMsg, rogueSig) {
 		t.Fatalf("rogue signature should be self-consistent with rogue key")
 	}
 
 	// But when the agent enforces its PINNED server public key (our mitigation):
-	if engine.VerifySignature(pinnedServerPubKey, validMsg, rogueSig) {
+	if engine.VerifySignature(pinnedServerPubKey, validPayloadMsg, rogueSig) {
 		t.Fatalf("CRITICAL: Pinned server public key must reject rogue signature from spoofed server!")
 	}
 }

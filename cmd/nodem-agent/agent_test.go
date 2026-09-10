@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/minoplhy/nodem/internal/ech/engine"
@@ -21,6 +22,22 @@ func createMockSignature(privKey string, pubKey string, clusterID, version int64
 	sigBase64, _ := engine.SignPayload(privKey, msg)
 	return &transport.SyncSignature{
 		Type:      transport.PayloadTypeSyncKeyUpdate,
+		Algorithm: "ed25519",
+		Checksum:  checksum,
+		SigBase64: sigBase64,
+		PublicKey: pubKey,
+	}
+}
+
+func signMockResponse(privKey, pubKey string, resp *transport.SyncResponse) {
+	if resp.Timestamp == 0 {
+		resp.Timestamp = time.Now().Unix()
+	}
+	checksum := resp.PayloadChecksum()
+	msg := transport.BuildSignableMessage(transport.PayloadTypeSyncPayload, resp.NodeID, resp.Timestamp, checksum)
+	sigBase64, _ := engine.SignPayload(privKey, msg)
+	resp.Signature = &transport.SyncSignature{
+		Type:      transport.PayloadTypeSyncPayload,
 		Algorithm: "ed25519",
 		Checksum:  checksum,
 		SigBase64: sigBase64,
@@ -59,7 +76,7 @@ func TestAgentHTTPSWorkflow(t *testing.T) {
 
 		if r.URL.Path == "/api/v1/agent/ech/sync" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+			resp := transport.SyncResponse{
 				Status: "UPDATES_AVAILABLE",
 				Clusters: []transport.ClusterSyncItem{
 					{
@@ -81,7 +98,9 @@ func TestAgentHTTPSWorkflow(t *testing.T) {
 						Signature:   createMockSignature(privKey, pubKey, 2, 3, keys2),
 					},
 				},
-			})
+			}
+			signMockResponse(privKey, pubKey, &resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -256,7 +275,7 @@ func TestAgentHTTPSWorkflowWithSubpath(t *testing.T) {
 
 		if r.URL.Path == "/custom/monitor/api/v1/agent/ech/sync" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+			resp := transport.SyncResponse{
 				Status: "UPDATES_AVAILABLE",
 				Clusters: []transport.ClusterSyncItem{
 					{
@@ -269,7 +288,9 @@ func TestAgentHTTPSWorkflowWithSubpath(t *testing.T) {
 						Signature:   createMockSignature(privKey, pubKey, 1, 3, keys),
 					},
 				},
-			})
+			}
+			signMockResponse(privKey, pubKey, &resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -351,6 +372,11 @@ func TestAgentEnvFileLoading(t *testing.T) {
 func TestAgentLegacyFolderMigration(t *testing.T) {
 	storageDir := t.TempDir()
 
+	pubKey, privKey, err := engine.GenerateSigningKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateSigningKeyPair failed: %v", err)
+	}
+
 	// 1. Create a legacy name-based folder
 	legacyDir := filepath.Join(storageDir, "cluster-legacy")
 	_ = os.MkdirAll(legacyDir, 0700)
@@ -372,7 +398,7 @@ func TestAgentLegacyFolderMigration(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/agent/ech/sync" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+			resp := transport.SyncResponse{
 				Status: "UP_TO_DATE",
 				Clusters: []transport.ClusterSyncItem{
 					{
@@ -382,7 +408,9 @@ func TestAgentLegacyFolderMigration(t *testing.T) {
 						Version:     1,
 					},
 				},
-			})
+			}
+			signMockResponse(privKey, pubKey, &resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/ech/ack" {
@@ -399,7 +427,7 @@ func TestAgentLegacyFolderMigration(t *testing.T) {
 		StorageDir:      storageDir,
 		ProxyType:       "nginx",
 		ReloadCmd:       "true",
-		ServerPublicKey: "mock_pub_key",
+		ServerPublicKey: pubKey,
 	}
 
 	if err := runSyncCycle(context.Background(), cfg); err != nil {
@@ -439,7 +467,7 @@ func TestAgentClusterRenameResilience(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/agent/ech/sync" {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+			resp := transport.SyncResponse{
 				Status: "UPDATES_AVAILABLE",
 				Clusters: []transport.ClusterSyncItem{
 					{
@@ -451,7 +479,9 @@ func TestAgentClusterRenameResilience(t *testing.T) {
 						Signature:   createMockSignature(privKey, pubKey, 10, 1, keys),
 					},
 				},
-			})
+			}
+			signMockResponse(privKey, pubKey, &resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		if r.URL.Path == "/api/v1/agent/ech/ack" {
@@ -528,7 +558,7 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if serverPhase == 1 {
 				// Phase 1: Two clusters assigned
-				_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+				resp := transport.SyncResponse{
 					Status: "UPDATES_AVAILABLE",
 					Clusters: []transport.ClusterSyncItem{
 						{
@@ -548,12 +578,14 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 							Signature:   createMockSignature(privKey, pubKey, 2, 1, keys2),
 						},
 					},
-				})
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				_ = json.NewEncoder(w).Encode(resp)
 				return
 			}
 
 			// Phase 2: Cluster 2 unassigned/deleted
-			_ = json.NewEncoder(w).Encode(transport.SyncResponse{
+			resp := transport.SyncResponse{
 				Status: "UPDATES_AVAILABLE",
 				Clusters: []transport.ClusterSyncItem{
 					{
@@ -565,7 +597,9 @@ func TestAgentClusterRemovalWorkflow(t *testing.T) {
 				},
 				RemovedClusterIDs: []int64{2},
 				RemovedClusters:   []string{"cluster-beta"},
-			})
+			}
+			signMockResponse(privKey, pubKey, &resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -716,100 +750,210 @@ func TestAgentSecurityVerification(t *testing.T) {
 		ECHCurrentPEM: "LEGIT_PEM",
 	}
 
-	validSig := createMockSignature(privKey, pubKey, 1, 1, keys)
+	validClusterSig := createMockSignature(privKey, pubKey, 1, 1, keys)
+
+	baseItem := transport.ClusterSyncItem{
+		ClusterID:   1,
+		ClusterName: "test-cluster",
+		PublicName:  "test.com",
+		Status:      "NEW_KEY",
+		Version:     1,
+		Keys:        keys,
+		Signature:   validClusterSig,
+	}
 
 	tests := []struct {
-		name          string
-		cfgKey        string
-		serverItem    transport.ClusterSyncItem
+		name           string
+		cfgKey         string
+		setupState     func(st *AgentState)
+		buildResponse  func() transport.SyncResponse
 		expectedErrSub string
 	}{
 		{
 			name:   "Missing pinned public key in agent config",
 			cfgKey: "",
-			serverItem: transport.ClusterSyncItem{
-				ClusterID:   1,
-				ClusterName: "test-cluster",
-				Status:      "NEW_KEY",
-				Version:     1,
-				Keys:        keys,
-				Signature:   validSig,
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				return resp
 			},
 			expectedErrSub: "missing required parameter: --server-public-key",
 		},
 		{
-			name:   "Missing signature in server payload",
+			name:   "Missing top-level signature in server payload",
 			cfgKey: pubKey,
-			serverItem: transport.ClusterSyncItem{
-				ClusterID:   1,
-				ClusterName: "test-cluster",
-				Status:      "NEW_KEY",
-				Version:     1,
-				Keys:        keys,
-				Signature:   nil,
+			buildResponse: func() transport.SyncResponse {
+				return transport.SyncResponse{
+					Status:    "UPDATES_AVAILABLE",
+					Clusters:  []transport.ClusterSyncItem{baseItem},
+					Signature: nil,
+				}
 			},
-			expectedErrSub: "payload signature missing",
+			expectedErrSub: "sync response signature missing",
 		},
 		{
-			name:   "DNS Poisoning attacker signed with rogue key and sent rogue pubkey on wire",
+			name:   "DNS Poisoning attacker signed top-level response with rogue key",
 			cfgKey: pubKey, // Agent pinned to legit pubKey
-			serverItem: transport.ClusterSyncItem{
-				ClusterID:   1,
-				ClusterName: "test-cluster",
-				Status:      "NEW_KEY",
-				Version:     1,
-				Keys:        keys,
-				Signature:   createMockSignature(roguePrivKey, roguePubKey, 1, 1, keys),
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(roguePrivKey, roguePubKey, &resp)
+				return resp
 			},
-			expectedErrSub: "payload signature verification failed",
+			expectedErrSub: "sync response signature verification failed",
 		},
 		{
-			name:   "Tampered checksum in signature",
+			name:   "Tampered top-level checksum in signature",
 			cfgKey: pubKey,
-			serverItem: transport.ClusterSyncItem{
-				ClusterID:   1,
-				ClusterName: "test-cluster",
-				Status:      "NEW_KEY",
-				Version:     1,
-				Keys:        keys,
-				Signature: &transport.SyncSignature{
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				resp.Signature.Checksum = "tampered_checksum_value"
+				return resp
+			},
+			expectedErrSub: "sync response payload checksum mismatch",
+		},
+		{
+			name:   "Tampered RemovedClusterIDs injected into signed response",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				// Attacker injects RemovedClusterIDs to DoS wipe local clusters
+				resp.RemovedClusterIDs = []int64{999}
+				return resp
+			},
+			expectedErrSub: "sync response payload checksum mismatch",
+		},
+		{
+			name:   "Tampered Status injected into signed response",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				// Attacker changes status to spoof UP_TO_DATE
+				resp.Status = "UP_TO_DATE"
+				return resp
+			},
+			expectedErrSub: "sync response payload checksum mismatch",
+		},
+		{
+			name:   "Tampered cluster key payload with original top-level signature",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{baseItem},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				// Attacker modifies cluster key payload
+				resp.Clusters[0].Keys = &transport.SyncKeysPayload{
+					Base64ECH:     "TAMPERED_KEY",
+					ECHCurrentPEM: "TAMPERED_PEM",
+				}
+				return resp
+			},
+			expectedErrSub: "sync response payload checksum mismatch",
+		},
+		{
+			name:   "Stale or replayed sync response detected",
+			cfgKey: pubKey,
+			setupState: func(st *AgentState) {
+				st.LastSyncTimestamp = 100000
+			},
+			buildResponse: func() transport.SyncResponse {
+				resp := transport.SyncResponse{
+					Timestamp: 90000, // Stale timestamp (< 100000 - 30)
+					Status:    "UP_TO_DATE",
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				return resp
+			},
+			expectedErrSub: "stale or replayed sync response detected",
+		},
+		{
+			name:   "Missing per-cluster key signature",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				itemWithoutSig := baseItem
+				itemWithoutSig.Signature = nil
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{itemWithoutSig},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				return resp
+			},
+			expectedErrSub: "payload signature missing for cluster",
+		},
+		{
+			name:   "Per-cluster key signature verification failed with rogue key",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				itemRogueSig := baseItem
+				itemRogueSig.Signature = createMockSignature(roguePrivKey, roguePubKey, 1, 1, keys)
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{itemRogueSig},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				return resp
+			},
+			expectedErrSub: "payload signature verification failed for cluster",
+		},
+		{
+			name:   "Per-cluster key checksum mismatch",
+			cfgKey: pubKey,
+			buildResponse: func() transport.SyncResponse {
+				itemBadChecksum := baseItem
+				itemBadChecksum.Signature = &transport.SyncSignature{
 					Type:      transport.PayloadTypeSyncKeyUpdate,
 					Algorithm: "ed25519",
-					Checksum:  "tampered_checksum_value",
-					SigBase64: validSig.SigBase64,
+					Checksum:  "tampered_cluster_checksum",
+					SigBase64: validClusterSig.SigBase64,
 					PublicKey: pubKey,
-				},
+				}
+				resp := transport.SyncResponse{
+					Status:   "UPDATES_AVAILABLE",
+					Clusters: []transport.ClusterSyncItem{itemBadChecksum},
+				}
+				signMockResponse(privKey, pubKey, &resp)
+				return resp
 			},
-			expectedErrSub: "payload checksum mismatch",
-		},
-		{
-			name:   "Tampered payload data with original signature",
-			cfgKey: pubKey,
-			serverItem: transport.ClusterSyncItem{
-				ClusterID:   1,
-				ClusterName: "test-cluster",
-				Status:      "NEW_KEY",
-				Version:     1,
-				Keys: &transport.SyncKeysPayload{
-					Base64ECH:     "TAMPERED_INJECTED_KEY",
-					ECHCurrentPEM: "TAMPERED_PEM",
-				},
-				Signature: validSig, // Checksum won't match tampered keys
-			},
-			expectedErrSub: "payload checksum mismatch",
+			expectedErrSub: "payload checksum mismatch for cluster",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			storageDir := t.TempDir()
+			stateFile := filepath.Join(storageDir, "agent_state.json")
+
+			if tc.setupState != nil {
+				st := AgentState{Clusters: make(map[string]ClusterState)}
+				tc.setupState(&st)
+				_ = saveLocalState(stateFile, st)
+			}
+
+			resp := tc.buildResponse()
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(transport.SyncResponse{
-					Status:   "UPDATES_AVAILABLE",
-					Clusters: []transport.ClusterSyncItem{tc.serverItem},
-				})
+				_ = json.NewEncoder(w).Encode(resp)
 			}))
 			defer server.Close()
 
