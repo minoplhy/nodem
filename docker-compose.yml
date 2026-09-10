@@ -4,12 +4,15 @@ services:
     container_name: nodem
     restart: unless-stopped
     ports:
-      - "8080:8080"
-      - "34234:34234" # ECH SSH pull server port
+      - "${PORT:-8080}:8080"
+      - "${ECH_SSH_PORT:-34234}:34234" # ECH SSH pull server port
+    env_file:
+      - path: ${ENV_FILE:-.env}
+        required: false
     environment:
-      - BASE_PATH=/
-      - PORT=8080
-      - ECH_SSH_PORT=34234
+      - BASE_PATH=${BASE_PATH:-/}
+      - PORT=${PORT:-8080}
+      - ECH_SSH_PORT=${ECH_SSH_PORT:-34234}
     volumes:
       - ./nodem_data:/app/data
     networks:

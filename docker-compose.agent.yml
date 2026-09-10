@@ -5,11 +5,14 @@ services:
     restart: unless-stopped
     # Loads configuration directly from .env.agent (or custom file via ENV_FILE)
     env_file:
-      - ${ENV_FILE:-.env.agent}
+      - path: ${ENV_FILE:-.env.agent}
+        required: false
     volumes:
       # Staging directory where ECH configs and PEM keys are written.
       # Mount this to your reverse proxy's config/certs directory or shared volume.
       - ./agent_data:/opt/ech
+      # Optional: Uncomment if controlling a containerized reverse proxy (e.g. docker exec)
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     extra_hosts:
       # Allows reaching host-bound services from within the container on Linux
       - "host.docker.internal:host-gateway"

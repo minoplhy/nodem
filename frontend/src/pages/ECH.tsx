@@ -872,13 +872,11 @@ export const ECH: React.FC = () => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div className="code-snippet-box">
                   <code>
-                    ech_agent --server="{controlPlaneUrl || 'http://<server-ip>:8080'}" --token=&lt;TOKEN&gt; --proxy=nginx --interval=300
+                    docker run -d --name nodem_agent --restart unless-stopped -e ECH_SERVER="{controlPlaneUrl || 'http://<server-ip>:8080'}" -e ECH_TOKEN=&lt;TOKEN&gt; -e ECH_PROXY=nginx -v ./agent_data:/opt/ech --add-host host.docker.internal:host-gateway ghcr.io/minoplhy/nodem-agent:latest
                   </code>
                 </div>
-                <div className="code-snippet-box">
-                  <code>
-                    ech_agent --server=&lt;server-ip&gt; --transport=ssh --ssh-port=34234 --ssh-key=~/.ssh/agent_id_ed25519 --proxy=caddy
-                  </code>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Or use <code>docker compose</code> with <code>docker-compose.agent.yml</code> and <code>.env.agent</code>
                 </div>
               </div>
             )}
@@ -1687,21 +1685,38 @@ export const ECH: React.FC = () => {
             )}
 
             {tokenModalDeployTab === 'docker' && (
-              <div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                  Execute in foreground or containerized daemon:
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                  Option A: One-line container deployment:
                 </p>
                 <div className="code-snippet-box" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <code style={{ fontSize: '0.8rem', overflowX: 'auto' }}>
-                    ech_agent --server="{controlPlaneUrl || 'http://<server-ip>:8080'}" --token="{revealedToken}" --proxy="{proxyType}" --interval=300
+                    docker run -d --name nodem_agent --restart unless-stopped -e ECH_SERVER="{controlPlaneUrl || 'http://<server-ip>:8080'}" -e ECH_TOKEN="{revealedToken}" -e ECH_PROXY="{proxyType}" -v ./agent_data:/opt/ech --add-host host.docker.internal:host-gateway ghcr.io/minoplhy/nodem-agent:latest
                   </code>
                   <Button
                     size="sm"
                     variant="secondary"
                     icon={copiedToken ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-                    onClick={() => copyToClipboard(`ech_agent --server="${controlPlaneUrl || 'http://<server-ip>:8080'}" --token="${revealedToken}" --proxy="${proxyType}" --interval=300`)}
+                    onClick={() => copyToClipboard(`docker run -d --name nodem_agent --restart unless-stopped -e ECH_SERVER="${controlPlaneUrl || 'http://<server-ip>:8080'}" -e ECH_TOKEN="${revealedToken}" -e ECH_PROXY="${proxyType}" -v ./agent_data:/opt/ech --add-host host.docker.internal:host-gateway ghcr.io/minoplhy/nodem-agent:latest`)}
                   >
                     Copy
+                  </Button>
+                </div>
+
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '4px 0 2px' }}>
+                  Option B: Docker Compose (copy <code>.env.agent</code> configuration):
+                </p>
+                <div className="code-snippet-box" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <code style={{ fontSize: '0.8rem', overflowX: 'auto' }}>
+                    ECH_SERVER={controlPlaneUrl || 'http://<server-ip>:8080'} ECH_TOKEN={revealedToken} ECH_PROXY={proxyType}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={copiedToken ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+                    onClick={() => copyToClipboard(`ECH_SERVER=${controlPlaneUrl || 'http://<server-ip>:8080'}\nECH_TOKEN=${revealedToken}\nECH_PROXY=${proxyType}\nECH_TRANSPORT=https\nECH_INTERVAL=300\n`)}
+                  >
+                    Copy .env
                   </Button>
                 </div>
               </div>

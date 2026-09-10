@@ -20,79 +20,258 @@
 
 ---
 
-## Quickstart
+---
 
-### 1. Install Control Plane (`nodem`)
+## Installation & Deployment
 
-Install the latest release binary and automatically configure the background service:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install.sh | sudo bash
-```
-
-Once installed, open your browser and navigate to:
-```
-http://<server-ip>:8080
-```
-During initial setup, copy the bootstrap token displayed in the terminal logs to create the administrator account.
-
-To uninstall:
-```bash
-curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall.sh | sudo bash
-```
+`nodem` supports two first-class deployment methods:
+- **[Docker Container](#option-1-docker-container-deployment-recommended)**: Instant copy-paste `docker compose` configurations with correspondent `.env` files. No need to clone the repository.
+- **[Standalone Installation](#option-2-standalone-installation-maintaining-scriptsh)**: Native shell installers (`script.sh`) with multi-init support (**Systemd** & **OpenRC**).
 
 ---
 
-### 2. Deploy Edge Agent (`nodem-agent` / `ech_agent`)
+### Option 1: Docker Container Deployment (Recommended)
 
-On each target reverse proxy server (Nginx, Caddy, HAProxy, or custom hooks), deploy the edge pull agent:
+#### A. Control Plane Server (`nodem`)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install-agent.sh | sudo bash -s -- \
-  --server="http://<server-ip>:8080" \
-  --token="<NODE_TOKEN>" \
-  --proxy="nginx"
-```
+1. **Create an application directory:**
+   ```bash
+   mkdir -p nodem && cd nodem
+   ```
 
-The installer detects your init system (**Systemd** or **OpenRC**), installs `/usr/local/bin/ech_agent`, and enables the native daemon.
+2. **Save the `docker-compose.yml` configuration:**
+   ```yaml
+   services:
+     nodem:
+       image: ghcr.io/minoplhy/nodem:latest
+       container_name: nodem
+       restart: unless-stopped
+       ports:
+         - "${PORT:-8080}:8080"
+         - "${ECH_SSH_PORT:-34234}:34234" # ECH SSH pull server port
+       env_file:
+         - path: .env
+           required: false
+       environment:
+         - BASE_PATH=${BASE_PATH:-/}
+         - PORT=${PORT:-8080}
+         - ECH_SSH_PORT=${ECH_SSH_PORT:-34234}
+       volumes:
+         - ./nodem_data:/app/data
+       networks:
+         - nodem_net
 
-To uninstall an agent:
-```bash
-curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall-agent.sh | sudo bash
-```
+   networks:
+     nodem_net:
+       enable_ipv6: true
+       ipam:
+         driver: default
+         config:
+           - subnet: 172.20.0.0/16
+           - subnet: fd00:cafe:face::/64
+   ```
+
+3. **(Optional) Create `.env` to customize settings:**
+   ```env
+   # HTTP server listening port for Web UI & REST API (default: 8080)
+   PORT=8080
+
+   # ECH SSH pull ingress port for edge nodes (default: 34234, 0 to disable)
+   ECH_SSH_PORT=34234
+
+   # URL subpath prefix if hosting behind a reverse proxy subpath (e.g. /nodem)
+   BASE_PATH=/
+
+   # Enable verbose debug logging in container stdout (true / false)
+   DEBUG=false
+   ```
+
+4. **Start the control plane:**
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Retrieve the bootstrap setup token & finish initial setup:**
+   ```bash
+   docker compose logs nodem
+   ```
+   Look for the **BOOTSTRAP PROTOCOL** banner in the logs containing your setup URL and one-time token:
+   ```text
+   👉 http://localhost:8080/setup?token=<BOOTSTRAP_TOKEN>
+   ```
+   Open the URL in your browser to create the administrator account.
 
 ---
 
-## Docker Deployment
+#### B. Edge Agent (`nodem-agent` / `ech_agent`)
 
-### Production (Pre-built GHCR Images)
+Deploy this lightweight daemon on each edge reverse proxy server (Nginx, Caddy, HAProxy, or custom hook) to pull ECH key updates from the control plane.
 
-Run the control plane server using the official GHCR container image:
+1. **Create an agent directory:**
+   ```bash
+   mkdir -p nodem-agent && cd nodem-agent
+   ```
 
-```bash
-docker compose up -d
-```
+2. **Save the `docker-compose.yml` configuration:**
+   ```yaml
+   services:
+     nodem_agent:
+       image: ghcr.io/minoplhy/nodem-agent:latest
+       container_name: nodem_agent
+       restart: unless-stopped
+       env_file:
+         - path: .env.agent
+           required: false
+       volumes:
+         # Local directory where ECH configs and PEM keys are staged
+         # Mount this to your reverse proxy's config directory (e.g. /opt/ech or /etc/nginx/ech)
+         - ./agent_data:/opt/ech
+         # Optional: Mount Docker socket if controlling a dockerized reverse proxy container
+         # - /var/run/docker.sock:/var/run/docker.sock:ro
+       extra_hosts:
+         # Resolves host-bound services from within the container on Linux
+         - "host.docker.internal:host-gateway"
+   ```
 
-To run an edge agent in Docker:
+3. **Save the correspondent `.env.agent` file:**
+   ```env
+   # Central nodem control plane server URL
+   ECH_SERVER=http://<server-ip>:8080
 
-```bash
-# Configure environment
-cp .env.agent.example .env.agent
-# Run agent container
-docker compose -f docker-compose.agent.yml up -d
-```
+   # Secret token generated when registering this node in the nodem Web UI (ECH -> Nodes -> Add Node)
+   ECH_TOKEN=replace_with_node_secret_token
 
-### Local Development (Building from Source)
+   # Reverse proxy handler: "nginx", "caddy", "haproxy", or "hook"
+   ECH_PROXY=nginx
 
-For local compilation and development:
+   # Pull transport mechanism: "https" (recommended) or "ssh"
+   ECH_TRANSPORT=https
 
-```bash
-# Build & run server
-docker compose -f docker-compose.dev.yml up --build
+   # Polling frequency in seconds (default: 300 = 5 minutes)
+   ECH_INTERVAL=300
 
-# Build & run agent
-docker compose -f docker-compose.agent.dev.yml up --build
-```
+   # Optional reload command override.
+   # For containerized proxies (with /var/run/docker.sock mounted), specify docker exec:
+   # ECH_RELOAD_CMD=docker exec nginx-proxy nginx -s reload
+   ECH_RELOAD_CMD=
+   ```
+
+4. **Start the edge agent:**
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Verify operation:**
+   ```bash
+   docker compose logs -f nodem_agent
+   ```
+
+---
+
+### Option 2: Standalone Installation (Maintaining `script.sh`)
+
+For bare-metal servers, virtual machines, or environments where Docker is not available.
+
+#### A. Control Plane Server (`nodem`)
+
+1. **One-Line Installer:**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install.sh | sudo bash
+   ```
+
+2. **Local Script Options & Flags:**
+   ```bash
+   # Preview installation without modifying the system
+   ./install.sh --dry-run
+
+   # Install with custom ports and directory
+   ./install.sh --port=8080 --ssh-port=34234 --dir=/usr/local/bin
+   ```
+   Available flags:
+   - `--port <port>`: HTTP server daemon port (default: `8080`)
+   - `--ssh-port <port>`: ECH SSH pull server port (default: `34234`)
+   - `--dir <path>`: Target binary directory (default: `/usr/local/bin`)
+   - `--version <tag>`: Install specific release version (default: `latest`)
+   - `--no-service`: Skip background system service registration
+   - `--dry-run`: Simulate operations without modifying system
+   - `--force`: Overwrite existing binary without prompt
+
+3. **Background Service Management:**
+   The installer automatically registers and starts a background service:
+   - **Systemd**:
+     ```bash
+     sudo systemctl status nodem
+     sudo systemctl restart nodem
+     sudo systemctl stop nodem
+     ```
+   - **OpenRC**:
+     ```bash
+     sudo rc-service nodem status
+     sudo rc-service nodem restart
+     sudo rc-service nodem stop
+     ```
+
+4. **Uninstallation:**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall.sh | sudo bash
+   ```
+
+---
+
+#### B. Edge Agent (`nodem-agent` / `ech_agent`)
+
+1. **One-Line Agent Deployment:**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install-agent.sh | sudo bash -s -- \
+     --server="http://<server-ip>:8080" \
+     --token="<NODE_TOKEN>" \
+     --proxy="nginx"
+   ```
+
+2. **Available Agent Flags:**
+   ```bash
+   # Example with custom polling interval and transport
+   curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/install-agent.sh | sudo bash -s -- \
+     --server="http://<server-ip>:8080" \
+     --token="<NODE_TOKEN>" \
+     --proxy="nginx" \
+     --interval=180 \
+     --storage-dir="/opt/ech" \
+     --init-system="auto"
+   ```
+   Available flags:
+   - `--server <url>`: Central nodem server URL (*required*)
+   - `--token <token>`: Edge agent secret token (*required*)
+   - `--proxy <type>`: Reverse proxy type: `nginx`, `caddy`, `haproxy`, or `hook` (default: `nginx`)
+   - `--transport <type>`: Pull transport: `https` or `ssh` (default: `https`)
+   - `--interval <secs>`: Polling interval in seconds (default: `300`)
+   - `--storage-dir <dir>`: Directory where ECH keys are written (default: `/opt/ech`)
+   - `--init-system <sys>`: Init system: `auto`, `systemd`, `openrc`, or `none` (default: `auto`)
+   - `--reload-cmd <cmd>`: Custom proxy reload command override
+   - `--hook <path>`: Custom script path when `--proxy=hook`
+   - `--ssh-port <port>`: SSH server port for ssh transport (default: `34234`)
+   - `--ssh-key <path>`: Path to agent SSH private key
+   - `--no-service`: Skip background daemon service registration
+   - `--dry-run`: Simulate operations without modifying system
+
+3. **Background Daemon Management:**
+   - **Systemd**:
+     ```bash
+     sudo systemctl status ech-agent
+     sudo systemctl restart ech-agent
+     sudo systemctl stop ech-agent
+     ```
+   - **OpenRC**:
+     ```bash
+     sudo rc-service ech-agent status
+     sudo rc-service ech-agent restart
+     sudo rc-service ech-agent stop
+     ```
+
+4. **Uninstallation:**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/minoplhy/nodem/master/uninstall-agent.sh | sudo bash
+   ```
 
 ---
 
