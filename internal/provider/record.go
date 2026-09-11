@@ -50,13 +50,9 @@ func (p *HTTPSRecordParams) GetTarget() string {
 	return p.Target
 }
 
-// ToRFC9460String formats the record in RFC 9460 presentation format:
-// e.g. 1 . alpn="h2,h3" ech="<BASE64>"
-func (p *HTTPSRecordParams) ToRFC9460String() string {
-	parts := []string{
-		fmt.Sprintf("%d", p.GetPriority()),
-		p.GetTarget(),
-	}
+// ValueString formats the SvcParams string (excluding priority and target) for providers like Cloudflare that require separate priority, target, and value fields.
+func (p *HTTPSRecordParams) ValueString() string {
+	var parts []string
 
 	if len(p.ALPN) > 0 {
 		parts = append(parts, fmt.Sprintf(`alpn="%s"`, strings.Join(p.ALPN, ",")))
@@ -72,8 +68,20 @@ func (p *HTTPSRecordParams) ToRFC9460String() string {
 		parts = append(parts, fmt.Sprintf(`ipv6hint="%s"`, strings.Join(p.IPv6Hint, ",")))
 	}
 
-	parts = append(parts, fmt.Sprintf(`ech="%s"`, p.Base64ECH))
+	if p.Base64ECH != "" {
+		parts = append(parts, fmt.Sprintf(`ech="%s"`, p.Base64ECH))
+	}
 	return strings.Join(parts, " ")
+}
+
+// ToRFC9460String formats the record in RFC 9460 presentation format:
+// e.g. 1 . alpn="h2,h3" ech="<BASE64>"
+func (p *HTTPSRecordParams) ToRFC9460String() string {
+	val := p.ValueString()
+	if val == "" {
+		return fmt.Sprintf("%d %s", p.GetPriority(), p.GetTarget())
+	}
+	return fmt.Sprintf("%d %s %s", p.GetPriority(), p.GetTarget(), val)
 }
 
 // ECHHex converts the Base64-encoded ECHConfigList to a lowercase hexadecimal string for Technitium.

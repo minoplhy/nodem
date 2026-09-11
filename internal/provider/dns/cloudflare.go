@@ -14,20 +14,29 @@ import (
 
 // CloudflareProvider implements provider.DNSProvider for the Cloudflare API v4.
 type CloudflareProvider struct {
-	token  string
-	zone   string
-	client *http.Client
+	BaseURL string
+	token   string
+	zone    string
+	client  *http.Client
 }
 
 // NewCloudflareProvider creates a new Cloudflare DNS provider.
 func NewCloudflareProvider(token, zone string) *CloudflareProvider {
 	return &CloudflareProvider{
-		token: token,
-		zone:  zone,
+		BaseURL: "https://api.cloudflare.com/client/v4",
+		token:   token,
+		zone:    zone,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+func (c *CloudflareProvider) baseURL() string {
+	if c.BaseURL != "" {
+		return c.BaseURL
+	}
+	return "https://api.cloudflare.com/client/v4"
 }
 
 func (c *CloudflareProvider) setHeaders(req *http.Request) {
@@ -53,7 +62,7 @@ func (c *CloudflareProvider) getZoneID(ctx context.Context) (string, error) {
 		return c.zone, nil
 	}
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", c.zone)
+	url := fmt.Sprintf("%s/zones?name=%s", c.baseURL(), c.zone)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -94,7 +103,7 @@ func (c *CloudflareProvider) ListRecords(ctx context.Context, recordName string)
 		return nil, err
 	}
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s&per_page=100", zoneID, recordName)
+	url := fmt.Sprintf("%s/zones/%s/dns_records?name=%s&per_page=100", c.baseURL(), zoneID, recordName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -138,7 +147,7 @@ func (c *CloudflareProvider) AddRecord(ctx context.Context, recordName, ip, reco
 		return err
 	}
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
+	url := fmt.Sprintf("%s/zones/%s/dns_records", c.baseURL(), zoneID)
 	payload := map[string]interface{}{
 		"type":    recordType,
 		"name":    recordName,
@@ -178,7 +187,7 @@ func (c *CloudflareProvider) DeleteRecord(ctx context.Context, recordName, ip, r
 		return err
 	}
 
-	queryURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s&type=%s&content=%s", zoneID, recordName, recordType, ip)
+	queryURL := fmt.Sprintf("%s/zones/%s/dns_records?name=%s&type=%s&content=%s", c.baseURL(), zoneID, recordName, recordType, ip)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
 	if err != nil {
 		return err
@@ -206,7 +215,7 @@ func (c *CloudflareProvider) DeleteRecord(ctx context.Context, recordName, ip, r
 	}
 
 	for _, rec := range data.Result {
-		delURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zoneID, rec.ID)
+		delURL := fmt.Sprintf("%s/zones/%s/dns_records/%s", c.baseURL(), zoneID, rec.ID)
 		delReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
 		if err != nil {
 			return err
@@ -240,10 +249,8 @@ func (c *CloudflareProvider) UpdateHTTPSRecord(ctx context.Context, params provi
 		ttl = 1 // 1 = automatic in Cloudflare
 	}
 
-	content := params.ToRFC9460String()
-
 	// 1. Check if record already exists
-	listURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?type=HTTPS&name=%s", zoneID, params.Domain)
+	listURL := fmt.Sprintf("%s/zones/%s/dns_records?type=HTTPS&name=%s", c.baseURL(), zoneID, params.Domain)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
 	if err != nil {
 		return err
@@ -264,8 +271,7 @@ func (c *CloudflareProvider) UpdateHTTPSRecord(ctx context.Context, params provi
 	var listData struct {
 		Success bool `json:"success"`
 		Result  []struct {
-			ID      string `json:"id"`
-			Content string `json:"content"`
+			ID string `json:"id"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(bodyBytes, &listData); err != nil {
@@ -275,53 +281,44 @@ func (c *CloudflareProvider) UpdateHTTPSRecord(ctx context.Context, params provi
 	recordPayload := map[string]any{
 		"type":    "HTTPS",
 		"name":    params.Domain,
-		"content": content,
 		"ttl":     ttl,
 		"proxied": false,
+		"data": map[string]any{
+			"priority": int(params.GetPriority()),
+			"target":   params.GetTarget(),
+			"value":    params.ValueString(),
+		},
 	}
 	payloadBytes, err := json.Marshal(recordPayload)
 	if err != nil {
 		return err
 	}
 
+	method := http.MethodPost
+	targetURL := fmt.Sprintf("%s/zones/%s/dns_records", c.baseURL(), zoneID)
+	action := "create"
+
 	if len(listData.Result) > 0 && listData.Result[0].ID != "" {
-		recordID := listData.Result[0].ID
-		updateURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zoneID, recordID)
-		putReq, err := http.NewRequestWithContext(ctx, http.MethodPut, updateURL, bytes.NewReader(payloadBytes))
-		if err != nil {
-			return err
-		}
-		c.setHeaders(putReq)
-
-		putResp, err := c.client.Do(putReq)
-		if err != nil {
-			return err
-		}
-		defer putResp.Body.Close()
-
-		if putResp.StatusCode < 200 || putResp.StatusCode >= 300 {
-			respBytes, _ := io.ReadAll(putResp.Body)
-			return fmt.Errorf("cloudflare update HTTPS record failed: %s", string(respBytes))
-		}
-		return nil
+		method = http.MethodPut
+		targetURL = fmt.Sprintf("%s/zones/%s/dns_records/%s", c.baseURL(), zoneID, listData.Result[0].ID)
+		action = "update"
 	}
 
-	createURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
-	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(payloadBytes))
+	opReq, err := http.NewRequestWithContext(ctx, method, targetURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return err
 	}
-	c.setHeaders(postReq)
+	c.setHeaders(opReq)
 
-	postResp, err := c.client.Do(postReq)
+	opResp, err := c.client.Do(opReq)
 	if err != nil {
 		return err
 	}
-	defer postResp.Body.Close()
+	defer opResp.Body.Close()
 
-	if postResp.StatusCode < 200 || postResp.StatusCode >= 300 {
-		respBytes, _ := io.ReadAll(postResp.Body)
-		return fmt.Errorf("cloudflare create HTTPS record failed: %s", string(respBytes))
+	if opResp.StatusCode < 200 || opResp.StatusCode >= 300 {
+		respBytes, _ := io.ReadAll(opResp.Body)
+		return fmt.Errorf("cloudflare %s HTTPS record failed: %s", action, string(respBytes))
 	}
 
 	return nil

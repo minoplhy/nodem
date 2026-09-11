@@ -34,6 +34,21 @@ func TestHTTPSRecordSerialization(t *testing.T) {
 		t.Errorf("expected ipv4hint, got: %s", rfcStr)
 	}
 
+	// ValueString (structured SvcParams excluding priority/target)
+	valStr := params.ValueString()
+	if strings.Contains(valStr, "1 .") {
+		t.Errorf("expected ValueString to NOT contain priority and target, got: %s", valStr)
+	}
+	if !strings.Contains(valStr, `alpn="h2,h3"`) {
+		t.Errorf("expected ValueString to contain alpn, got: %s", valStr)
+	}
+	if !strings.Contains(valStr, `ech="AED+DQBIAAgABQAQAAwAAgABAAIAAQAAAAECAw=="`) {
+		t.Errorf("expected ValueString to contain ech, got: %s", valStr)
+	}
+	if !strings.Contains(valStr, `ipv4hint="198.51.100.1"`) {
+		t.Errorf("expected ValueString to contain ipv4hint, got: %s", valStr)
+	}
+
 	// Technitium Pipe-separated syntax
 	techStr := params.ToTechnitiumParams()
 	if !strings.Contains(techStr, "alpn|h2,h3") {
