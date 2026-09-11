@@ -226,6 +226,33 @@ func TestAgentNginxIncludesGeneration(t *testing.T) {
 	}
 }
 
+func TestGenerateMasterIncludesConf_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	storageDir := filepath.Join(tmpDir, "non_existent_subdir")
+
+	// Verify it auto-creates storage directory and generates a valid placeholder config
+	if err := generateMasterIncludesConf(storageDir); err != nil {
+		t.Fatalf("generateMasterIncludesConf on empty dir failed: %v", err)
+	}
+
+	includesPath := filepath.Join(storageDir, "ech_includes.conf")
+	data, err := os.ReadFile(includesPath)
+	if err != nil {
+		t.Fatalf("failed reading generated ech_includes.conf: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "# Automatically generated") {
+		t.Errorf("expected header comment in empty config, got: %s", content)
+	}
+	if !strings.Contains(content, "No active ECH clusters") {
+		t.Errorf("expected notice comment for no active clusters, got: %s", content)
+	}
+	if strings.Contains(content, "ssl_ech_file") {
+		t.Errorf("expected no ssl_ech_file directives in empty config, got: %s", content)
+	}
+}
+
 func TestResolveEndpointURL(t *testing.T) {
 	testCases := []struct {
 		server   string
