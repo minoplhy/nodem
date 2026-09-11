@@ -1,4 +1,4 @@
-package providers
+package dns
 
 import (
 	"bytes"
@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/minoplhy/nodem/internal/provider"
 )
 
-// CloudflareProvider implements DnsProvider for the Cloudflare API v4.
+// CloudflareProvider implements provider.DNSProvider for the Cloudflare API v4.
 type CloudflareProvider struct {
 	token  string
 	zone   string
@@ -227,7 +229,7 @@ func (c *CloudflareProvider) DeleteRecord(ctx context.Context, recordName, ip, r
 }
 
 // UpdateHTTPSRecord creates or updates an RFC 9460 Type 65 HTTPS resource record with ECH config.
-func (c *CloudflareProvider) UpdateHTTPSRecord(ctx context.Context, params HTTPSRecordParams) error {
+func (c *CloudflareProvider) UpdateHTTPSRecord(ctx context.Context, params provider.HTTPSRecordParams) error {
 	zoneID, err := c.getZoneID(ctx)
 	if err != nil {
 		return err

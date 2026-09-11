@@ -1,4 +1,4 @@
-package providers
+package dns
 
 import (
 	"context"
@@ -10,9 +10,11 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/minoplhy/nodem/internal/provider"
 )
 
-// TechnitiumProvider implements DnsProvider for the Technitium DNS Server HTTP API.
+// TechnitiumProvider implements provider.DNSProvider for the Technitium DNS Server HTTP API.
 type TechnitiumProvider struct {
 	apiURL string
 	token  string
@@ -149,7 +151,7 @@ func (t *TechnitiumProvider) DeleteRecord(ctx context.Context, recordName, ip, r
 }
 
 // UpdateHTTPSRecord creates or updates an RFC 9460 Type 65 HTTPS resource record on Technitium.
-func (t *TechnitiumProvider) UpdateHTTPSRecord(ctx context.Context, params HTTPSRecordParams) error {
+func (t *TechnitiumProvider) UpdateHTTPSRecord(ctx context.Context, params provider.HTTPSRecordParams) error {
 	zone := t.zone
 	if zone == "" {
 		zone = params.GetDomain()

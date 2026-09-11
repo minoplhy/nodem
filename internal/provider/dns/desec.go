@@ -1,4 +1,4 @@
-package providers
+package dns
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/minoplhy/nodem/internal/provider"
 )
 
 // DesecProvider manages DNS records via the deSEC.io REST API.
@@ -189,7 +191,7 @@ func (d *DesecProvider) DeleteRecord(ctx context.Context, recordName, ip, record
 	return nil
 }
 
-func (d *DesecProvider) UpdateHTTPSRecord(ctx context.Context, params HTTPSRecordParams) error {
+func (d *DesecProvider) UpdateHTTPSRecord(ctx context.Context, params provider.HTTPSRecordParams) error {
 	subname, zone := d.getSubnameAndZone(params.Domain)
 	formattedValue := params.ToRFC9460String()
 

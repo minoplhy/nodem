@@ -10,7 +10,8 @@ import (
 	"github.com/minoplhy/nodem/internal/db"
 	"github.com/minoplhy/nodem/internal/ech/engine"
 	"github.com/minoplhy/nodem/internal/ech/transport"
-	"github.com/minoplhy/nodem/internal/providers"
+	"github.com/minoplhy/nodem/internal/provider"
+	"github.com/minoplhy/nodem/internal/provider/dns"
 )
 
 // RunECHCoordinator handles background ECH rotation scheduling, embedded SSH server, and two-phase DNS sync.
@@ -148,7 +149,7 @@ func syncClusterDomainsDNS(ctx context.Context, repo db.Repository, cluster db.E
 			continue
 		}
 
-		client, err := providers.CreateProviderClient(provCfg)
+		client, err := dns.CreateProviderClient(provCfg)
 		if err != nil {
 			slog.Error("ECH reconcile: failed creating provider client", "domain", d.Domain, "error", err)
 			continue
@@ -180,7 +181,7 @@ func syncClusterDomainsDNS(ctx context.Context, repo db.Repository, cluster db.E
 			}
 		}
 
-		params := providers.HTTPSRecordParams{
+		params := provider.HTTPSRecordParams{
 			Domain:     d.Domain,
 			Base64ECH:  activeKey.Base64ECH,
 			PublicName: cluster.PublicName,

@@ -1,6 +1,7 @@
-package providers
+package provider
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -136,3 +137,57 @@ func (p *HTTPSRecordParams) ToTechnitiumParams() string {
 	}
 	return strings.Join(pairs, "|")
 }
+
+// RecordTypeForIP returns "A" for IPv4 addresses and "AAAA" for IPv6 addresses.
+func RecordTypeForIP(ip string) string {
+	if strings.Contains(ip, ":") {
+		return "AAAA"
+	}
+	return "A"
+}
+
+// RecordEvent represents an uptime or downtime transition event.
+type RecordEvent string
+
+const (
+	EventUptime   RecordEvent = "UP"
+	EventDowntime RecordEvent = "DOWN"
+)
+
+// HandleRecordEvent evaluates an uptime or downtime event trigger and synchronizes DNS records accordingly.
+// When event is EventUptime and the IP is not present in currentRecords, it invokes p.AddRecord.
+// When event is EventDowntime and the IP is present in currentRecords, it invokes p.DeleteRecord.
+// Returns true if a record modification was performed on the provider, false if no change was needed (already in desired state).
+func HandleRecordEvent(ctx context.Context, p DNSProvider, event RecordEvent, recordName, ip string, currentRecords []string) (bool, error) {
+	isPresent := false
+	for _, existing := range currentRecords {
+		if existing == ip {
+			isPresent = true
+			break
+		}
+	}
+
+	rtype := RecordTypeForIP(ip)
+
+	switch event {
+	case EventUptime:
+		if !isPresent {
+			if err := p.AddRecord(ctx, recordName, ip, rtype); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		return false, nil
+	case EventDowntime:
+		if isPresent {
+			if err := p.DeleteRecord(ctx, recordName, ip, rtype); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("unknown record event: %s", event)
+	}
+}
+

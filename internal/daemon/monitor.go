@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/minoplhy/nodem/internal/checkers"
 	"github.com/minoplhy/nodem/internal/db"
 	"github.com/minoplhy/nodem/internal/notifications"
-	"github.com/minoplhy/nodem/internal/providers"
+	"github.com/minoplhy/nodem/internal/provider"
+	"github.com/minoplhy/nodem/internal/provider/dns"
 	"github.com/minoplhy/nodem/internal/rules"
 )
 
@@ -213,7 +213,7 @@ func runGroupMonitor(ctx context.Context, repo db.Repository, initialGroup db.Ta
 
 			providerConfig, _ := repo.GetProviderByIDDirect(ctx, group.DnsProviderID)
 			if providerConfig != nil {
-				dnsClient, err := providers.CreateProviderClient(providerConfig)
+				dnsClient, err := dns.CreateProviderClient(providerConfig)
 				if err == nil {
 					activeDnsRecords, listErr := dnsClient.ListRecords(ctx, group.DnsRecord)
 					var dnsRecordsState *[]string
@@ -376,10 +376,7 @@ func runGroupMonitor(ctx context.Context, repo db.Repository, initialGroup db.Ta
 								}
 							}
 
-							rtype := "A"
-							if strings.Contains(ip.IP, ":") {
-								rtype = "AAAA"
-							}
+							rtype := provider.RecordTypeForIP(ip.IP)
 
 							now := time.Now().UTC()
 

@@ -1,4 +1,4 @@
-package main
+package agent
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/minoplhy/nodem/internal/ech/transport"
 )
@@ -36,8 +37,8 @@ func DetectInitSystem() (string, error) {
 	return "", fmt.Errorf("unable to auto-detect init system")
 }
 
-// reloadLocalProxies handles configuration generation and service reloading for updated clusters.
-func reloadLocalProxies(cfg AgentConfig, updatedClusters []transport.ClusterSyncItem) error {
+// ReloadLocalProxies handles configuration generation and service reloading for updated clusters.
+func ReloadLocalProxies(cfg Config, updatedClusters []transport.ClusterSyncItem) error {
 	initSys := cfg.InitSystem
 	if initSys == "" || initSys == InitSystemAuto {
 		detected, err := DetectInitSystem()
@@ -50,28 +51,28 @@ func reloadLocalProxies(cfg AgentConfig, updatedClusters []transport.ClusterSync
 
 	switch cfg.ProxyType {
 	case "nginx":
-		if err := generateMasterIncludesConf(cfg.StorageDir); err != nil {
+		if err := GenerateMasterIncludesConf(cfg.StorageDir); err != nil {
 			return err
 		}
 		if cfg.ReloadCmd != "" {
 			slog.Info("Executing custom reload command for nginx", "command", cfg.ReloadCmd)
-			return executeCommand(cfg.ReloadCmd)
+			return ExecuteCommand(cfg.ReloadCmd)
 		}
-		return reloadNginx(initSys)
+		return ReloadNginx(initSys)
 
 	case "caddy":
 		if cfg.ReloadCmd != "" {
 			slog.Info("Executing custom reload command for caddy", "command", cfg.ReloadCmd)
-			return executeCommand(cfg.ReloadCmd)
+			return ExecuteCommand(cfg.ReloadCmd)
 		}
-		return reloadCaddy()
+		return ReloadCaddy()
 
 	case "haproxy":
 		if cfg.ReloadCmd != "" {
 			slog.Info("Executing custom reload command for haproxy", "command", cfg.ReloadCmd)
-			return executeCommand(cfg.ReloadCmd)
+			return ExecuteCommand(cfg.ReloadCmd)
 		}
-		return reloadHAProxy(initSys)
+		return ReloadHAProxy(initSys)
 
 	case "hook":
 		if cfg.HookScript == "" {
@@ -109,18 +110,16 @@ func reloadLocalProxies(cfg AgentConfig, updatedClusters []transport.ClusterSync
 	}
 }
 
-// reloadNginx validates configuration first, then reloads via OpenRC, Systemd, or signal.
-func reloadNginx(initSys string) error {
-	// 1. Verify syntax before attempting reload to prevent taking down active web traffic
+// ReloadNginx validates configuration first, then reloads via OpenRC, Systemd, or signal.
+func ReloadNginx(initSys string) error {
 	testCmd := "nginx -t"
 	if os.Geteuid() != 0 {
 		testCmd = "sudo nginx -t 2>/dev/null || nginx -t"
 	}
-	if err := executeCommand(testCmd); err != nil {
+	if err := ExecuteCommand(testCmd); err != nil {
 		return fmt.Errorf("nginx configuration test failed; refusing reload: %w", err)
 	}
 
-	// 2. Init-system specific reload
 	var reloadCmd string
 	switch initSys {
 	case InitSystemOpenRC:
@@ -138,7 +137,6 @@ func reloadNginx(initSys string) error {
 		}
 
 	default:
-		// Standalone or container
 		if os.Geteuid() == 0 {
 			reloadCmd = "nginx -s reload"
 		} else {
@@ -147,11 +145,11 @@ func reloadNginx(initSys string) error {
 	}
 
 	slog.Info("Reloading Nginx with init-aware command", "init_system", initSys, "cmd", reloadCmd)
-	return executeCommand(reloadCmd)
+	return ExecuteCommand(reloadCmd)
 }
 
-// reloadHAProxy reloads HAProxy using Systemd or OpenRC service management.
-func reloadHAProxy(initSys string) error {
+// ReloadHAProxy reloads HAProxy using Systemd or OpenRC service management.
+func ReloadHAProxy(initSys string) error {
 	var reloadCmd string
 	switch initSys {
 	case InitSystemOpenRC:
@@ -177,12 +175,22 @@ func reloadHAProxy(initSys string) error {
 	}
 
 	slog.Info("Reloading HAProxy", "init_system", initSys, "cmd", reloadCmd)
-	return executeCommand(reloadCmd)
+	return ExecuteCommand(reloadCmd)
 }
 
-// reloadCaddy reloads Caddy via its native CLI / admin API.
-func reloadCaddy() error {
+// ReloadCaddy reloads Caddy via its native CLI.
+func ReloadCaddy() error {
 	cmd := "caddy reload"
 	slog.Info("Reloading Caddy", "cmd", cmd)
-	return executeCommand(cmd)
+	return ExecuteCommand(cmd)
+}
+
+// ExecuteCommand executes a shell command returning an error with command output on failure.
+func ExecuteCommand(command string) error {
+	cmd := exec.Command("sh", "-c", command)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("command '%s' failed: %s: %w", command, strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }

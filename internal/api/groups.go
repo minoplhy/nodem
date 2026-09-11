@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/minoplhy/nodem/internal/checkers"
 	"github.com/minoplhy/nodem/internal/db"
-	"github.com/minoplhy/nodem/internal/providers"
+	"github.com/minoplhy/nodem/internal/provider/dns"
 )
 
 type CreateGroupRequest struct {
@@ -246,7 +246,7 @@ func (s *AppState) GetGroupStatus(w http.ResponseWriter, r *http.Request) {
 	var unmanagedIPs []string
 	providerConfig, _ := s.Repo.GetProviderByIDDirect(r.Context(), group.DnsProviderID)
 	if providerConfig != nil {
-		if client, err := providers.CreateProviderClient(providerConfig); err == nil {
+		if client, err := dns.CreateProviderClient(providerConfig); err == nil {
 			if records, err := client.ListRecords(r.Context(), group.DnsRecord); err == nil {
 				for _, rec := range records {
 					found := false
@@ -367,7 +367,7 @@ func (s *AppState) GetAllGroupsStatus(w http.ResponseWriter, r *http.Request) {
 			var unmanagedIPs []string
 			providerConfig, _ := s.Repo.GetProviderByIDDirect(r.Context(), group.DnsProviderID)
 			if providerConfig != nil {
-				if client, err := providers.CreateProviderClient(providerConfig); err == nil {
+				if client, err := dns.CreateProviderClient(providerConfig); err == nil {
 					if records, err := client.ListRecords(r.Context(), group.DnsRecord); err == nil {
 						for _, rec := range records {
 							found := false

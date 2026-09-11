@@ -1,4 +1,4 @@
-package providers
+package dns
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/minoplhy/nodem/internal/provider"
 )
 
 // HookProvider executes an external shell script or binary to handle DNS operations.
@@ -84,7 +86,7 @@ func (h *HookProvider) DeleteRecord(ctx context.Context, recordName, ip, recordT
 	return err
 }
 
-func (h *HookProvider) UpdateHTTPSRecord(ctx context.Context, params HTTPSRecordParams) error {
+func (h *HookProvider) UpdateHTTPSRecord(ctx context.Context, params provider.HTTPSRecordParams) error {
 	rfcString := params.ToRFC9460String()
 	_, err := h.runHook(ctx, "update_https", map[string]string{
 		"DNS_DOMAIN":      params.Domain,

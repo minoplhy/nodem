@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-)
 
-const DefaultStorageDir = "/opt/ech"
+	"github.com/minoplhy/nodem/internal/agent"
+)
 
 func handleClusterCommand(args []string) error {
 	subArgs := args[1:]
@@ -35,11 +35,11 @@ func handleClusterCommand(args []string) error {
 
 func handleClusterList(args []string) error {
 	fs := flag.NewFlagSet("cluster list", flag.ExitOnError)
-	storageDir := fs.String("storage-dir", getEnv("ECH_STORAGE_DIR", DefaultStorageDir), "Directory where ECH keys are staged")
+	storageDir := fs.String("storage-dir", agent.GetEnv("ECH_STORAGE_DIR", agent.DefaultStorageDir), "Directory where ECH keys are staged")
 	_ = fs.Parse(args)
 
 	stateFile := filepath.Join(*storageDir, "agent_state.json")
-	localState := loadLocalState(stateFile)
+	localState := agent.LoadState(stateFile)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "CLUSTER ID\tCLUSTER NAME\tVERSION\tDIRECTORY\tSTATUS\tLAST SYNC")
@@ -58,7 +58,7 @@ func handleClusterList(args []string) error {
 			}
 		}
 
-		dirName := ClusterDirName(cid)
+		dirName := agent.ClusterDirName(cid)
 		clusterDir := filepath.Join(*storageDir, dirName)
 		currPath := filepath.Join(clusterDir, "ech_current.pem")
 
@@ -84,11 +84,11 @@ func handleClusterList(args []string) error {
 
 func handleClusterRemove(args []string) error {
 	fs := flag.NewFlagSet("cluster remove", flag.ExitOnError)
-	storageDir := fs.String("storage-dir", getEnv("ECH_STORAGE_DIR", DefaultStorageDir), "Directory where ECH keys are staged")
-	proxyType := fs.String("proxy", getEnv("ECH_PROXY", "nginx"), "Proxy type: nginx, caddy, haproxy, hook")
-	reloadCmd := fs.String("reload-cmd", getEnv("ECH_RELOAD_CMD", ""), "Custom proxy reload command override")
-	hookScript := fs.String("hook", getEnv("ECH_HOOK_SCRIPT", ""), "Path to hook script for proxy=hook")
-	initSys := fs.String("init-system", getEnv("ECH_INIT_SYSTEM", "auto"), "Init system: auto, systemd, openrc")
+	storageDir := fs.String("storage-dir", agent.GetEnv("ECH_STORAGE_DIR", agent.DefaultStorageDir), "Directory where ECH keys are staged")
+	proxyType := fs.String("proxy", agent.GetEnv("ECH_PROXY", "nginx"), "Proxy type: nginx, caddy, haproxy, hook")
+	reloadCmd := fs.String("reload-cmd", agent.GetEnv("ECH_RELOAD_CMD", ""), "Custom proxy reload command override")
+	hookScript := fs.String("hook", agent.GetEnv("ECH_HOOK_SCRIPT", ""), "Path to hook script for proxy=hook")
+	initSys := fs.String("init-system", agent.GetEnv("ECH_INIT_SYSTEM", "auto"), "Init system: auto, systemd, openrc")
 	yesFlag := fs.Bool("yes", false, "Skip confirmation prompt")
 	yFlag := fs.Bool("y", false, "Alias for --yes")
 	dryRun := fs.Bool("dry-run", false, "Simulate removal without modifying files")
@@ -109,7 +109,7 @@ func handleClusterRemove(args []string) error {
 	}
 
 	stateFile := filepath.Join(*storageDir, "agent_state.json")
-	localState := loadLocalState(stateFile)
+	localState := agent.LoadState(stateFile)
 
 	var targetID int64
 	var targetName string
@@ -139,7 +139,7 @@ func handleClusterRemove(args []string) error {
 
 	if targetID <= 0 {
 		if strings.HasPrefix(target, "cluster_") {
-			if id, ok := ParseClusterIDFromDir(target); ok {
+			if id, ok := agent.ParseClusterIDFromDir(target); ok {
 				targetID = id
 			}
 		}
@@ -162,11 +162,11 @@ func handleClusterRemove(args []string) error {
 	}
 
 	if *dryRun {
-		fmt.Printf("[DRY-RUN] Would remove cluster directory %s and update state\n", ClusterDirPath(*storageDir, targetID))
+		fmt.Printf("[DRY-RUN] Would remove cluster directory %s and update state\n", agent.ClusterDirPath(*storageDir, targetID))
 		return nil
 	}
 
-	cfg := AgentConfig{
+	cfg := agent.Config{
 		StorageDir: *storageDir,
 		ProxyType:  *proxyType,
 		ReloadCmd:  *reloadCmd,
@@ -176,7 +176,7 @@ func handleClusterRemove(args []string) error {
 
 	// 1. Remove files and trigger hooks
 	clustersToRemove := map[int64]string{targetID: targetName}
-	if err := removeLocally(cfg, clustersToRemove); err != nil {
+	if err := agent.RemoveLocally(cfg, clustersToRemove); err != nil {
 		return fmt.Errorf("failed removing cluster files: %w", err)
 	}
 
@@ -185,10 +185,10 @@ func handleClusterRemove(args []string) error {
 		delete(localState.Clusters, stateKey)
 	}
 	delete(localState.Clusters, fmt.Sprintf("%d", targetID))
-	_ = saveLocalState(stateFile, localState)
+	_ = agent.SaveState(stateFile, localState)
 
 	// 3. Reload proxy
-	if err := reloadLocalProxies(cfg, nil); err != nil {
+	if err := agent.ReloadLocalProxies(cfg, nil); err != nil {
 		return fmt.Errorf("failed reloading proxy: %w", err)
 	}
 
@@ -198,17 +198,17 @@ func handleClusterRemove(args []string) error {
 
 func handleClusterPrune(args []string) error {
 	fs := flag.NewFlagSet("cluster prune", flag.ExitOnError)
-	storageDir := fs.String("storage-dir", getEnv("ECH_STORAGE_DIR", DefaultStorageDir), "Directory where ECH keys are staged")
-	proxyType := fs.String("proxy", getEnv("ECH_PROXY", "nginx"), "Proxy type: nginx, caddy, haproxy, hook")
-	reloadCmd := fs.String("reload-cmd", getEnv("ECH_RELOAD_CMD", ""), "Custom proxy reload command override")
-	initSys := fs.String("init-system", getEnv("ECH_INIT_SYSTEM", "auto"), "Init system: auto, systemd, openrc")
+	storageDir := fs.String("storage-dir", agent.GetEnv("ECH_STORAGE_DIR", agent.DefaultStorageDir), "Directory where ECH keys are staged")
+	proxyType := fs.String("proxy", agent.GetEnv("ECH_PROXY", "nginx"), "Proxy type: nginx, caddy, haproxy, hook")
+	reloadCmd := fs.String("reload-cmd", agent.GetEnv("ECH_RELOAD_CMD", ""), "Custom proxy reload command override")
+	initSys := fs.String("init-system", agent.GetEnv("ECH_INIT_SYSTEM", "auto"), "Init system: auto, systemd, openrc")
 	yesFlag := fs.Bool("yes", false, "Skip confirmation prompt")
 	yFlag := fs.Bool("y", false, "Alias for --yes")
 	dryRun := fs.Bool("dry-run", false, "Simulate prune without deleting files")
 	_ = fs.Parse(args)
 
 	stateFile := filepath.Join(*storageDir, "agent_state.json")
-	localState := loadLocalState(stateFile)
+	localState := agent.LoadState(stateFile)
 
 	activeIDs := make(map[int64]bool)
 	for _, cs := range localState.Clusters {
@@ -227,7 +227,7 @@ func handleClusterPrune(args []string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		if cid, isClusterDir := ParseClusterIDFromDir(entry.Name()); isClusterDir {
+		if cid, isClusterDir := agent.ParseClusterIDFromDir(entry.Name()); isClusterDir {
 			if !activeIDs[cid] {
 				orphanDirs = append(orphanDirs, filepath.Join(*storageDir, entry.Name()))
 			}
@@ -265,13 +265,13 @@ func handleClusterPrune(args []string) error {
 		_ = os.RemoveAll(d)
 	}
 
-	cfg := AgentConfig{
+	cfg := agent.Config{
 		StorageDir: *storageDir,
 		ProxyType:  *proxyType,
 		ReloadCmd:  *reloadCmd,
 		InitSystem: *initSys,
 	}
-	_ = reloadLocalProxies(cfg, nil)
+	_ = agent.ReloadLocalProxies(cfg, nil)
 
 	fmt.Printf("Successfully pruned %d directory(ies).\n", len(orphanDirs))
 	return nil
