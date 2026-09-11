@@ -1,18 +1,38 @@
 import React from 'react';
 import type { ECHLog } from '../../core';
 import { EmptyState } from '../ui/EmptyState';
-import { ListIcon } from '../icons/Icons';
+import { Button } from '../ui/Button';
+import { ListIcon, RefreshIcon } from '../icons/Icons';
 
 interface ECHClusterLogsProps {
   logs: ECHLog[];
+  loading?: boolean;
+  onRefresh?: () => void;
 }
 
-export const ECHClusterLogs: React.FC<ECHClusterLogsProps> = ({ logs }) => {
+export const ECHClusterLogs: React.FC<ECHClusterLogsProps> = ({
+  logs,
+  loading = false,
+  onRefresh,
+}) => {
   return (
     <div className="glass-panel" style={{ padding: '1.25rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '8px' }}>
         <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>Rotation & Pull Activity Log</h4>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Latest 50 events</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Latest 50 events</span>
+          {onRefresh && (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={loading}
+              icon={<RefreshIcon size={14} />}
+              onClick={onRefresh}
+            >
+              Refresh
+            </Button>
+          )}
+        </div>
       </div>
 
       {logs.length === 0 ? (
@@ -20,6 +40,8 @@ export const ECHClusterLogs: React.FC<ECHClusterLogsProps> = ({ logs }) => {
           icon={<ListIcon size={32} />}
           title="No Audit Logs"
           description="Key generation, edge node pulls, ACKs, and DNS record updates will appear here."
+          actionLabel={onRefresh ? 'Refresh Logs' : undefined}
+          onAction={onRefresh}
         />
       ) : (
         <div style={{ overflowX: 'auto' }}>

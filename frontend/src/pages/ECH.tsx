@@ -15,6 +15,7 @@ import {
 } from '../components/icons/Icons';
 import { useToast } from '../hooks/useToast';
 import { useConfirm } from '../hooks/useConfirm';
+import { usePolling } from '../hooks/usePolling';
 
 // ECH modular components
 import { HPKE_CIPHER_SUITE_PRESETS } from '../components/ech/constants';
@@ -54,6 +55,8 @@ export const ECH: React.FC = () => {
   const [serverKeyInfo, setServerKeyInfo] = useState<ServerPublicKeyInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [rotating, setRotating] = useState(false);
+  const [refreshingLogs, setRefreshingLogs] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
 
   // Sub-tabs in Cluster view: 'nodes' | 'domains' | 'logs'
   const [activeTab, setActiveTab] = useState<'nodes' | 'domains' | 'logs'>('nodes');
@@ -93,7 +96,7 @@ export const ECH: React.FC = () => {
   }, []);
 
   // Fetch all clusters
-  const fetchClusters = useCallback(async () => {
+  const fetchClusters = useCallback(async (silent = false) => {
     try {
       const res = await fn(`${API_URL}/ech/clusters`);
       if (res.ok) {
@@ -108,11 +111,11 @@ export const ECH: React.FC = () => {
         } else {
           setActiveClusterId(null);
         }
-      } else {
+      } else if (!silent) {
         toast.error('Failed to load ECH clusters');
       }
     } catch {
-      toast.error('Network error loading ECH clusters');
+      if (!silent) toast.error('Network error loading ECH clusters');
     } finally {
       setLoading(false);
     }
@@ -137,7 +140,7 @@ export const ECH: React.FC = () => {
   }, []);
 
   // Fetch cluster details (nodes, domains, logs)
-  const fetchClusterDetails = useCallback(async (clusterId: number) => {
+  const fetchClusterDetails = useCallback(async (clusterId: number, silent = false) => {
     try {
       const [nodesRes, domsRes, logsRes] = await Promise.all([
         fn(`${API_URL}/ech/clusters/${clusterId}/nodes`),
@@ -158,7 +161,7 @@ export const ECH: React.FC = () => {
         setLogs(Array.isArray(lData) ? lData : []);
       }
     } catch {
-      toast.error('Failed to load cluster details');
+      if (!silent) toast.error('Failed to load cluster details');
     }
   }, [toast]);
 
@@ -176,6 +179,47 @@ export const ECH: React.FC = () => {
       setLogs([]);
     }
   }, [activeClusterId, fetchClusterDetails]);
+
+  // Manual refresh specifically for active cluster details & logs
+  const handleRefreshLogs = useCallback(async () => {
+    if (!activeClusterId) return;
+    setRefreshingLogs(true);
+    await fetchClusterDetails(activeClusterId, false);
+    setRefreshingLogs(false);
+  }, [activeClusterId, fetchClusterDetails]);
+
+  // Full manual refresh handler for ECH
+  const handleManualRefreshAll = useCallback(async () => {
+    setRefreshingAll(true);
+    if (mainTab === 'nodes') {
+      await fetchNodes();
+    } else if (activeClusterId) {
+      await Promise.all([
+        fetchClusters(false),
+        fetchClusterDetails(activeClusterId, false),
+        fetchNodes(),
+      ]);
+    } else {
+      await Promise.all([fetchClusters(false), fetchNodes()]);
+    }
+    setRefreshingAll(false);
+  }, [mainTab, activeClusterId, fetchClusters, fetchClusterDetails, fetchNodes]);
+
+  // Scheduled polling callback matching Dashboard.tsx
+  const pollData = useCallback(async () => {
+    if (mainTab === 'nodes') {
+      await fetchNodes();
+    } else if (mainTab === 'clusters' && activeClusterId) {
+      await Promise.all([
+        fetchClusterDetails(activeClusterId, true),
+        fetchClusters(true),
+        fetchNodes(),
+      ]);
+    }
+  }, [mainTab, activeClusterId, fetchNodes, fetchClusterDetails, fetchClusters]);
+
+  // Poll every 5s with visibility-state awareness
+  usePolling(pollData, 5000, true);
 
   const activeCluster = clusters.find((c) => c.id === activeClusterId);
 
@@ -376,6 +420,15 @@ export const ECH: React.FC = () => {
         subtitle="Decoupled edge node fleet, cryptographic TLS 1.3 Encrypted Client Hello key rotation, and Two-Phase DNS synchronization."
       >
         <div style={{ display: 'flex', gap: '8px' }}>
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={refreshingAll}
+            icon={<RefreshIcon size={14} />}
+            onClick={handleManualRefreshAll}
+          >
+            Refresh
+          </Button>
           {mainTab === 'clusters' ? (
             <>
               {activeCluster && (
@@ -514,7 +567,11 @@ export const ECH: React.FC = () => {
 
                 {/* TAB 3: AUDIT LOGS */}
                 {activeTab === 'logs' && (
-                  <ECHClusterLogs logs={logs} />
+                  <ECHClusterLogs
+                    logs={logs}
+                    loading={refreshingLogs}
+                    onRefresh={handleRefreshLogs}
+                  />
                 )}
               </>
             )}
