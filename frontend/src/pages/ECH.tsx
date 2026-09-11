@@ -248,9 +248,7 @@ export const ECH: React.FC = () => {
 
   // --- Node Handlers ---
   const handleOpenRegisterNode = (preselectedClusterId?: number) => {
-    setNodeRegisterInitialClusterId(
-      preselectedClusterId ? preselectedClusterId : activeClusterId ? activeClusterId : null
-    );
+    setNodeRegisterInitialClusterId(preselectedClusterId ?? null);
     setShowNodeModal(true);
   };
 

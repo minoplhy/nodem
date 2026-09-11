@@ -142,7 +142,9 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
         </div>
 
         <div className="form-group mb-4">
-          <label className="form-label">Assign to ECH Clusters</label>
+          <label className="form-label">
+            Assign to ECH Clusters <span style={{ fontWeight: 'normal', color: 'var(--text-muted)' }}>(Optional)</span>
+          </label>
           {clusters.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No clusters configured yet.</div>
           ) : (
@@ -170,7 +172,7 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
             </div>
           )}
           <small className="form-hint" style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-            The node can be assigned to multiple clusters now or later.
+            Edge nodes are independent. Leave unchecked to register as a standalone node, or select clusters to assign now.
           </small>
         </div>
 

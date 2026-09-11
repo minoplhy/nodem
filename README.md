@@ -84,6 +84,9 @@
 
    # Enable verbose debug logging in container stdout (true / false)
    DEBUG=false
+
+   # Custom OpenSSL 3.2+ / 4.x binary path with native ECH support (optional)
+   # OPENSSL_PATH=/opt/openssl/bin/openssl
    ```
 
 4. **Start the control plane:**
@@ -138,6 +141,9 @@ Deploy this lightweight daemon on each edge reverse proxy server (Nginx, Caddy, 
    # Central nodem control plane server URL
    ECH_SERVER=http://<server-ip>:8080
 
+   # Server root Ed25519 public key (required: from nodem Web UI ECH -> Nodes)
+   ECH_SERVER_PUBLIC_KEY=replace_with_server_public_key
+
    # Secret token generated when registering this node in the nodem Web UI (ECH -> Nodes -> Add Node)
    ECH_TOKEN=replace_with_node_secret_token
 
@@ -146,6 +152,9 @@ Deploy this lightweight daemon on each edge reverse proxy server (Nginx, Caddy, 
 
    # Pull transport mechanism: "https" (recommended) or "ssh"
    ECH_TRANSPORT=https
+
+   # Local directory where ECH configs and keys are staged (default: /opt/ech)
+   ECH_STORAGE_DIR=/opt/ech
 
    # Polling frequency in seconds (default: 300 = 5 minutes)
    ECH_INTERVAL=300
