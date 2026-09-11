@@ -105,6 +105,7 @@ func reconcileECHClusters(ctx context.Context, repo db.Repository, openSSLPath .
 			}
 
 			c.CurrentVersion = newVersion
+			c.LastRotatedAt = &now
 			_, _ = repo.AddECHLog(ctx, c.ID, nil, nil, "GENERATE", fmt.Sprintf("Auto-generated ECH key version %d", newVersion))
 		}
 
