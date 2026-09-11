@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,7 +17,6 @@ import (
 	"github.com/minoplhy/nodem/internal/db/sqlite"
 	"github.com/minoplhy/nodem/internal/ech/engine"
 	"github.com/minoplhy/nodem/internal/ech/transport"
-	"strconv"
 )
 
 func setupAPITestDB(t *testing.T) (*sqlite.SqliteRepository, *db.User, *db.ECHCluster, http.Handler) {
@@ -48,9 +49,41 @@ func setupAPITestDB(t *testing.T) (*sqlite.SqliteRepository, *db.User, *db.ECHCl
 	_, _ = repo.IncrementClusterVersion(ctx, cluster.ID, time.Now().UTC(), time.Now().UTC().Add(168*time.Hour))
 	_, _ = repo.SaveNewECHKey(ctx, cluster.ID, 1, "BASE64_KEY", "PRIV", "CONF", "-----BEGIN ECHCONFIG-----\nKEY1\n-----END ECHCONFIG-----")
 
+	tmpDir := t.TempDir()
+	fakeOpenSSL := filepath.Join(tmpDir, "fake_openssl.sh")
+	fakeScript := `#!/bin/sh
+if [ "$1" = "ech" ] && [ "$2" = "-help" ]; then
+  exit 0
+fi
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-out" ]; then
+    out="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+if [ -n "$out" ]; then
+  cat << 'PEM' > "$out"
+-----BEGIN PRIVATE KEY-----
+dGVzdF9wcml2YXRlX2tleV8zMl9ieXRlc19sb25nISE=
+-----END PRIVATE KEY-----
+-----BEGIN ECHCONFIG-----
+dGVzdF9lY2hjb25maWdfYnl0ZXNfbG9uZ19oZXJlISE=
+-----END ECHCONFIG-----
+PEM
+fi
+exit 0
+`
+	if err := os.WriteFile(fakeOpenSSL, []byte(fakeScript), 0755); err != nil {
+		t.Fatalf("failed creating fake openssl: %v", err)
+	}
+
 	state := &api.AppState{
 		Repo:           repo,
 		BootstrapToken: "bootstrap_token",
+		OpenSSLPath:    fakeOpenSSL,
 	}
 
 	router := api.BuildRouter(state)
@@ -418,5 +451,51 @@ func TestGetServerPublicKeyEndpoint(t *testing.T) {
 		t.Errorf("expected algorithm ed25519, got %s", resp.Algorithm)
 	}
 }
+
+func TestTriggerClusterRotationResetsDomainsToPending(t *testing.T) {
+	repo, user, cluster, router := setupAPITestDB(t)
+	ctx := context.Background()
+
+	sessionID := "test_session_rotate"
+	_ = repo.CreateSession(ctx, sessionID, "rotate_test", user.ID, time.Now().Add(24*time.Hour), nil, nil)
+
+	// 1. Create a provider and domain for the cluster
+	prov, err := repo.CreateProvider(ctx, user.ID, "Cloudflare-Test", "CLOUDFLARE", "", "mock_token", "zone123")
+	if err != nil {
+		t.Fatalf("CreateProvider failed: %v", err)
+	}
+
+	ipv4 := "192.0.2.1"
+	dom, err := repo.CreateECHDomain(ctx, cluster.ID, prov.ID, nil, "app.example.com", 300, "h2,h3", &ipv4, nil)
+	if err != nil {
+		t.Fatalf("CreateECHDomain failed: %v", err)
+	}
+
+	// 2. Mark domain as SYNCED
+	now := time.Now().UTC()
+	if err := repo.UpdateECHDomainSyncStatus(ctx, dom.ID, "SYNCED", &now); err != nil {
+		t.Fatalf("UpdateECHDomainSyncStatus failed: %v", err)
+	}
+
+	// 3. Trigger manual cluster rotation via API
+	req := httptest.NewRequest("POST", "/api/ech/clusters/"+strconv.FormatInt(cluster.ID, 10)+"/rotate", nil)
+	req.AddCookie(&http.Cookie{Name: "session_id", Value: sessionID})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/ech/clusters/{id}/rotate failed: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. Verify domain DNS status was reset to PENDING
+	reloadedDom, err := repo.GetECHDomain(ctx, dom.ID)
+	if err != nil || reloadedDom == nil {
+		t.Fatalf("GetECHDomain failed: %v", err)
+	}
+	if reloadedDom.DNSStatus != "PENDING" {
+		t.Errorf("expected domain dns_status to be PENDING after manual rotation, got: %s", reloadedDom.DNSStatus)
+	}
+}
+
 
 

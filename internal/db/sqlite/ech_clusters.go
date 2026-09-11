@@ -194,10 +194,14 @@ func (r *SqliteRepository) IncrementClusterVersion(ctx context.Context, clusterI
 		return 0, fmt.Errorf("failed to increment cluster version: %w", err)
 	}
 
-	// Flag all nodes on older versions as OUTDATED
-	updateNodesQuery := `UPDATE ech_nodes SET sync_status = 'OUTDATED'
+	// Flag all nodes assigned to this cluster on older versions as OUTDATED
+	updateNodesQuery := `UPDATE ech_cluster_nodes SET sync_status = 'OUTDATED'
 	                     WHERE cluster_id = ? AND last_applied_version < ?`
 	_, _ = r.db.ExecContext(ctx, updateNodesQuery, clusterID, newVersion)
+
+	// Reset all domains for this cluster to PENDING for DNS sync
+	updateDomainsQuery := `UPDATE ech_domains SET dns_status = 'PENDING' WHERE cluster_id = ?`
+	_, _ = r.db.ExecContext(ctx, updateDomainsQuery, clusterID)
 
 	return newVersion, nil
 }

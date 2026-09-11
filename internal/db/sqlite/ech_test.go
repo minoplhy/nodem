@@ -245,6 +245,45 @@ func TestECHDomainOperations(t *testing.T) {
 	if err != nil || updatedDom == nil || updatedDom.DNSStatus != "SYNCED" || updatedDom.LastSyncedAt == nil {
 		t.Fatalf("GetECHDomain updated failed: %+v, err: %v", updatedDom, err)
 	}
+
+	// Create a node assigned to this cluster
+	tokenHash := "hash_val"
+	node, err := repo.CreateECHNode(ctx, user.ID, "Node-1", "HTTPS", &tokenHash, nil, "NGINX")
+	if err != nil {
+		t.Fatalf("CreateECHNode failed: %v", err)
+	}
+	if err := repo.SetNodeClusters(ctx, node.ID, []int64{cluster.ID}); err != nil {
+		t.Fatalf("SetNodeClusters failed: %v", err)
+	}
+	// Node reports in-sync for version 0
+	if err := repo.RecordClusterNodeAck(ctx, cluster.ID, node.ID, 0, "IN_SYNC", "127.0.0.1", nil); err != nil {
+		t.Fatalf("RecordClusterNodeAck failed: %v", err)
+	}
+
+	// 5. Increment Cluster Version: must reset domains to PENDING and outdate nodes in ech_cluster_nodes
+	rotTime := now.Add(1 * time.Hour)
+	newVer, err := repo.IncrementClusterVersion(ctx, cluster.ID, rotTime, rotTime.Add(168*time.Hour))
+	if err != nil {
+		t.Fatalf("IncrementClusterVersion failed: %v", err)
+	}
+	if newVer != 1 {
+		t.Fatalf("expected new version 1, got %d", newVer)
+	}
+
+	// Verify domain reset to PENDING
+	reloadedDom, err := repo.GetECHDomain(ctx, dom.ID)
+	if err != nil || reloadedDom.DNSStatus != "PENDING" {
+		t.Fatalf("expected domain dns_status to be PENDING after version increment, got: %+v", reloadedDom)
+	}
+
+	// Verify node status in ech_cluster_nodes is OUTDATED
+	nodeEntries, err := repo.ListClusterNodes(ctx, cluster.ID)
+	if err != nil || len(nodeEntries) == 0 {
+		t.Fatalf("ListClusterNodes failed: %v", err)
+	}
+	if nodeEntries[0].SyncStatus != "OUTDATED" {
+		t.Errorf("expected node sync_status OUTDATED, got: %s", nodeEntries[0].SyncStatus)
+	}
 }
 
 func TestLegacyECHNodesMigration(t *testing.T) {

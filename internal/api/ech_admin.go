@@ -175,6 +175,15 @@ func (s *AppState) TriggerClusterRotation(w http.ResponseWriter, r *http.Request
 
 	_, _ = s.Repo.AddECHLog(r.Context(), cluster.ID, nil, nil, "GENERATE", fmt.Sprintf("Generated new ECH key version %d", newVersion))
 
+	// Mark all domains in cluster as PENDING for DNS sync
+	domains, _ := s.Repo.ListECHDomains(r.Context(), cluster.ID)
+	for _, d := range domains {
+		_ = s.Repo.UpdateECHDomainSyncStatus(r.Context(), d.ID, "PENDING", nil)
+	}
+	if len(domains) > 0 {
+		_, _ = s.Repo.AddECHLog(r.Context(), cluster.ID, nil, nil, "DNS_PENDING", fmt.Sprintf("Reset %d domain(s) to PENDING awaiting node sync for version %d", len(domains), newVersion))
+	}
+
 	RespondJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"version": newVersion,

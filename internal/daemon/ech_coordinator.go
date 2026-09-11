@@ -139,7 +139,11 @@ func syncClusterDomainsDNS(ctx context.Context, repo db.Repository, cluster db.E
 
 	for _, d := range domains {
 		if d.DNSStatus == "SYNCED" {
-			continue
+			// If the cluster was rotated after this domain was last synced, it is stale and must be re-synced!
+			if cluster.LastRotatedAt == nil || (d.LastSyncedAt != nil && !d.LastSyncedAt.Before(*cluster.LastRotatedAt)) {
+				continue
+			}
+			slog.Info("ECH reconcile: domain marked SYNCED but last sync is older than cluster rotation; re-syncing DNS", "domain", d.Domain, "cluster_id", cluster.ID)
 		}
 
 		// Lookup DNS provider config
