@@ -33,20 +33,47 @@ type GeneratedKey struct {
 type Engine struct {
 	DockerImage      string
 	ContainerRuntime string // "auto", "docker", "podman"
+	OpenSSLPath      string // Custom path to openssl binary (optional)
 }
 
 // NewEngine creates a new ECH generation engine.
-func NewEngine(dockerImage, containerRuntime string) *Engine {
+func NewEngine(dockerImage, containerRuntime string, openSSLPath ...string) *Engine {
 	if dockerImage == "" {
 		dockerImage = "echm-openssl4"
 	}
 	if containerRuntime == "" {
 		containerRuntime = "auto"
 	}
+	var customPath string
+	if len(openSSLPath) > 0 && strings.TrimSpace(openSSLPath[0]) != "" {
+		customPath = strings.TrimSpace(openSSLPath[0])
+	} else if p := strings.TrimSpace(os.Getenv("OPENSSL_PATH")); p != "" {
+		customPath = p
+	} else if p := strings.TrimSpace(os.Getenv("OPENSSL_BIN")); p != "" {
+		customPath = p
+	}
+
 	return &Engine{
 		DockerImage:      dockerImage,
 		ContainerRuntime: containerRuntime,
+		OpenSSLPath:      customPath,
 	}
+}
+
+// ResolveOpenSSLPath locates the openssl binary to use, checking custom OpenSSLPath first, then PATH.
+func (e *Engine) ResolveOpenSSLPath() (string, error) {
+	if e.OpenSSLPath != "" {
+		path, err := exec.LookPath(e.OpenSSLPath)
+		if err != nil {
+			return "", fmt.Errorf("custom OpenSSL binary not found at '%s': %w", e.OpenSSLPath, err)
+		}
+		return path, nil
+	}
+	path, err := exec.LookPath("openssl")
+	if err != nil {
+		return "", fmt.Errorf("openssl binary not found on PATH: %w", err)
+	}
+	return path, nil
 }
 
 // DetectRuntime identifies the available container or host runtime.
@@ -58,7 +85,20 @@ func (e *Engine) DetectRuntime() (string, error) {
 		return e.ContainerRuntime, nil
 	}
 
-	// 1. Check host native openssl with ech support
+	// 1. If custom OpenSSL path is explicitly configured, validate and use it directly
+	if e.OpenSSLPath != "" {
+		binPath, err := e.ResolveOpenSSLPath()
+		if err != nil {
+			return "", err
+		}
+		cmd := exec.Command(binPath, "ech", "-help")
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("custom OpenSSL binary at '%s' does not support ECH ('openssl ech' command failed): %w", binPath, err)
+		}
+		return "host-openssl", nil
+	}
+
+	// 2. Check host native openssl with ech support from PATH
 	if opensslPath, err := exec.LookPath("openssl"); err == nil {
 		cmd := exec.Command(opensslPath, "ech", "-help")
 		if err := cmd.Run(); err == nil {
@@ -66,7 +106,7 @@ func (e *Engine) DetectRuntime() (string, error) {
 		}
 	}
 
-	// 2. Check container engines
+	// 3. Check container engines
 	for _, rt := range []string{"docker", "podman"} {
 		if _, err := exec.LookPath(rt); err == nil {
 			return rt, nil
@@ -157,6 +197,10 @@ func (e *Engine) GenerateECHKeyPair(ctx context.Context, publicName, cipherSuite
 	var cmd *exec.Cmd
 
 	if rt == "host-openssl" {
+		binPath, err := e.ResolveOpenSSLPath()
+		if err != nil {
+			return nil, err
+		}
 		args := []string{"ech", "-public_name", publicName, "-out", hostOutPath}
 		if cipherSuite != "" {
 			args = append(args, "-suite", cipherSuite)
@@ -164,7 +208,7 @@ func (e *Engine) GenerateECHKeyPair(ctx context.Context, publicName, cipherSuite
 		if maxNameLen > 0 {
 			args = append(args, "-max_name_len", fmt.Sprintf("%d", maxNameLen))
 		}
-		cmd = exec.CommandContext(ctx, "openssl", args...)
+		cmd = exec.CommandContext(ctx, binPath, args...)
 	} else {
 		if !e.CheckImageExists(ctx, rt) {
 			return nil, fmt.Errorf("container image '%s' not found locally in %s (run BuildImage or build container first)", e.DockerImage, rt)

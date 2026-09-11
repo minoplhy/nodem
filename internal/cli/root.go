@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	dbPath string
+	dbPath      string
+	openSSLPath string
 )
 
 // RootCmd builds and returns the root cobra Command.
@@ -42,6 +43,7 @@ func RootCmd(getRepo func() (db.Repository, error), runDaemon func(port uint16, 
 	})
 
 	root.PersistentFlags().StringVar(&dbPath, "db", "node_monitor.db", "Path to SQLite database file")
+	root.PersistentFlags().StringVar(&openSSLPath, "openssl-path", "", "Path to custom OpenSSL 4.x binary (supports ECH)")
 
 	// 1. Daemon Command
 	var daemonPort uint16
@@ -368,6 +370,20 @@ func GetDBPath() string {
 		return "node_monitor.db"
 	}
 	return dbPath
+}
+
+// GetOpenSSLPath returns the configured custom OpenSSL binary path.
+func GetOpenSSLPath() string {
+	if openSSLPath != "" {
+		return openSSLPath
+	}
+	if p := strings.TrimSpace(os.Getenv("OPENSSL_PATH")); p != "" {
+		return p
+	}
+	if p := strings.TrimSpace(os.Getenv("OPENSSL_BIN")); p != "" {
+		return p
+	}
+	return ""
 }
 
 func Execute() {

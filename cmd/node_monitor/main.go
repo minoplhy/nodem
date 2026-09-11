@@ -103,14 +103,20 @@ func main() {
 			d.Start(daemonCtx)
 		}()
 
+		openSSLPath := cli.GetOpenSSLPath()
+		if openSSLPath != "" {
+			slog.Info("Using custom OpenSSL binary", "path", openSSLPath)
+		}
+
 		// Start background ECH coordinator (handles rotation schedule, SSH pull server, and two-phase DNS sync)
-		go daemon.RunECHCoordinator(daemonCtx, r, sshPort)
+		go daemon.RunECHCoordinator(daemonCtx, r, sshPort, openSSLPath)
 
 		// Start REST API server
 		state := &api.AppState{
 			Repo:           r,
 			BootstrapToken: bootstrapToken,
 			BasePath:       basePath,
+			OpenSSLPath:    openSSLPath,
 		}
 
 		router := api.BuildRouter(state)

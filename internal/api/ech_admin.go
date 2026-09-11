@@ -152,7 +152,7 @@ func (s *AppState) TriggerClusterRotation(w http.ResponseWriter, r *http.Request
 	}
 
 	// Generate new ECH Key using engine
-	eng := engine.NewEngine("", "auto")
+	eng := engine.NewEngine("", "auto", s.OpenSSLPath)
 	key, err := eng.GenerateECHKeyPair(r.Context(), cluster.PublicName, cluster.CipherSuite, cluster.MaxNameLen)
 	if err != nil {
 		RespondError(w, http.StatusInternalServerError, fmt.Sprintf("ECH Key generation failed: %v", err))

@@ -14,7 +14,7 @@ import (
 )
 
 // RunECHCoordinator handles background ECH rotation scheduling, embedded SSH server, and two-phase DNS sync.
-func RunECHCoordinator(ctx context.Context, repo db.Repository, sshPort uint16) {
+func RunECHCoordinator(ctx context.Context, repo db.Repository, sshPort uint16, openSSLPath ...string) {
 	slog.Info("ECH coordinator starting...", "ssh_port", sshPort)
 
 	pullService := transport.NewPullService(repo)
@@ -37,12 +37,12 @@ func RunECHCoordinator(ctx context.Context, repo db.Repository, sshPort uint16) 
 	defer ticker.Stop()
 
 	// Initial cycle
-	reconcileECHClusters(ctx, repo)
+	reconcileECHClusters(ctx, repo, openSSLPath...)
 
 	for {
 		select {
 		case <-ticker.C:
-			reconcileECHClusters(ctx, repo)
+			reconcileECHClusters(ctx, repo, openSSLPath...)
 		case <-ctx.Done():
 			slog.Info("ECH coordinator shutting down.")
 			return
@@ -50,7 +50,7 @@ func RunECHCoordinator(ctx context.Context, repo db.Repository, sshPort uint16) 
 	}
 }
 
-func reconcileECHClusters(ctx context.Context, repo db.Repository) {
+func reconcileECHClusters(ctx context.Context, repo db.Repository, openSSLPath ...string) {
 	clusters, err := repo.ListAllECHClusters(ctx)
 	if err != nil {
 		slog.Error("ECH reconcile: failed to list clusters", "error", err)
@@ -58,7 +58,7 @@ func reconcileECHClusters(ctx context.Context, repo db.Repository) {
 	}
 
 	now := time.Now().UTC()
-	eng := engine.NewEngine("", "auto")
+	eng := engine.NewEngine("", "auto", openSSLPath...)
 
 	for _, c := range clusters {
 		if ctx.Err() != nil {

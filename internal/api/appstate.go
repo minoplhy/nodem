@@ -15,6 +15,7 @@ type AppState struct {
 	Repo           db.Repository
 	BootstrapToken string
 	BasePath       string
+	OpenSSLPath    string
 	PullService    interface {
 		AuthenticateByToken(ctx context.Context, token, callerTransport string) (*db.ECHNode, error)
 		SyncNode(ctx context.Context, node *db.ECHNode, req transport.SyncRequest, callerIP string) (*transport.SyncResponse, error)
