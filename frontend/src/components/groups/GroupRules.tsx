@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { fn, API_URL } from '../../core';
-import type { GroupRule, CheckConfig } from '../../core';
+import { groups as groupsApi } from '../../api/endpoints';
+import type { GroupRule, CheckConfig } from '../../api/types';
 import { RuleBuilder, serializeNode, deserializeNode } from '../rules/RuleBuilder';
 import type { VisualNode } from '../rules/RuleBuilder';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { PlusIcon, TrashIcon } from '../icons/Icons';
-import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useApiMutation } from '../../hooks/useApiMutation';
 
 interface GroupRulesProps {
   groupId: number;
@@ -22,7 +22,6 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
   groupChecks,
   onRefresh,
 }) => {
-  const toast = useToast();
   const confirm = useConfirm();
 
   const [showModal, setShowModal] = useState(false);
@@ -36,7 +35,24 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
       },
     ],
   });
-  const [submitting, setSubmitting] = useState(false);
+
+  const addRule = useApiMutation(
+    (body: { expression_json: string; action: string }) => groupsApi.addRule(groupId, body),
+    {
+      success: 'Evaluation rule created successfully',
+      error: 'Failed to create rule',
+      onSuccess: () => {
+        setShowModal(false);
+        onRefresh();
+      },
+    }
+  );
+
+  const deleteRule = useApiMutation((ruleId: number) => groupsApi.removeRule(groupId, ruleId), {
+    success: 'Rule deleted',
+    error: 'Failed to delete rule',
+    onSuccess: onRefresh,
+  });
 
   const handleOpenAdd = () => {
     setAction('RemoveFromDns');
@@ -54,34 +70,7 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      const expressionObj = serializeNode(rootNode);
-      const expressionJson = JSON.stringify(expressionObj);
-
-      const res = await fn(`${API_URL}/groups/${groupId}/rules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          expression_json: expressionJson,
-          action,
-        }),
-      });
-
-      if (res.ok) {
-        toast.success('Evaluation rule created successfully');
-        setShowModal(false);
-        onRefresh();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to create rule');
-      }
-    } catch (e) {
-      toast.error('Connection error while saving rule');
-    } finally {
-      setSubmitting(false);
-    }
+    await addRule.mutate({ expression_json: JSON.stringify(serializeNode(rootNode)), action });
   };
 
   const handleDelete = async (ruleId: number) => {
@@ -91,19 +80,7 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
       confirmText: 'Delete',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/groups/${groupId}/rules/${ruleId}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Rule deleted');
-        onRefresh();
-      } else {
-        toast.error('Failed to delete rule');
-      }
-    } catch (e) {
-      toast.error('Connection error while deleting rule');
-    }
+    if (confirmed) await deleteRule.mutate(ruleId);
   };
 
   const renderSummary = (exprJson: string) => {
@@ -137,13 +114,13 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '24px' }}>
+    <div className="glass-panel panel-pad">
       <div className="flex-between" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h3 className="font-title" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
             Routing & Failover Rules
           </h3>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Logic expressions evaluated per node to dictate DNS pool membership.
           </p>
         </div>
@@ -211,7 +188,7 @@ export const GroupRules: React.FC<GroupRulesProps> = ({
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleSubmit}>
+            <Button variant="primary" loading={addRule.isPending} onClick={handleSubmit}>
               Save Rule
             </Button>
           </>

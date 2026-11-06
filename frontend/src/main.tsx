@@ -5,18 +5,16 @@ import './style.css';
 import { initParticles } from './components/particles';
 
 import { BrowserRouter } from 'react-router-dom';
+import { BASE_PATH } from './core';
 
 initParticles();
-
-const rawBase = (window as any).__BASE_PATH__ || import.meta.env.BASE_URL || '/';
-const basename = rawBase.replace(/\/$/, '');
 
 const container = document.getElementById('app');
 if (container) {
   const root = createRoot(container);
   root.render(
     <React.StrictMode>
-      <BrowserRouter basename={basename}>
+      <BrowserRouter basename={BASE_PATH || '/'}>
         <App />
       </BrowserRouter>
     </React.StrictMode>

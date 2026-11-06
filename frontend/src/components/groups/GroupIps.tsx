@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../core';
-import type { TargetIp } from '../../core';
+import { groups as groupsApi } from '../../api/endpoints';
+import type { TargetIp } from '../../api/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { PlusIcon, TrashIcon, AlertTriangleIcon, CheckIcon } from '../icons/Icons';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useApiMutation } from '../../hooks/useApiMutation';
 
 interface GroupIpsProps {
   groupId: number;
@@ -27,11 +28,12 @@ export const GroupIps: React.FC<GroupIpsProps> = ({
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [targetIpVal, setTargetIpVal] = useState('');
   const [localIps, setLocalIps] = useState<TargetIp[]>(groupIps);
-  const [saving, setSaving] = useState(false);
+  // True while localIps holds unsaved edits; server refreshes must not clobber them.
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    setLocalIps(groupIps);
-  }, [groupIps]);
+    if (!dirty) setLocalIps(groupIps);
+  }, [groupIps, dirty]);
 
   const hasUnsavedChanges = JSON.stringify(localIps.map(x => ({ ip: x.ip, enabled: x.enabled }))) !==
     JSON.stringify(groupIps.map(x => ({ ip: x.ip, enabled: x.enabled })));
@@ -69,11 +71,13 @@ export const GroupIps: React.FC<GroupIpsProps> = ({
     });
 
     setLocalIps(nextIps);
+    setDirty(true);
     setShowBatchModal(false);
     toast.info('IP pool updated locally. Click "Save Changes" to persist.');
   };
 
   const handleToggleIp = (ipId: number) => {
+    setDirty(true);
     setLocalIps((prev) =>
       prev.map((ip) => (ip.id === ipId ? { ...ip, enabled: !ip.enabled } : ip))
     );
@@ -88,41 +92,34 @@ export const GroupIps: React.FC<GroupIpsProps> = ({
     });
     if (!confirmed) return;
 
+    setDirty(true);
     setLocalIps((prev) => prev.filter((ip) => ip.id !== ipId));
   };
 
-  const handleSaveBatch = async () => {
-    setSaving(true);
-    try {
-      const payload = localIps.map((ip) => ({ ip: ip.ip, enabled: ip.enabled }));
-      const res = await fn(`${API_URL}/groups/${groupId}/ips`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ips: payload }),
-      });
-
-      if (res.ok) {
-        toast.success('Target IPs synchronized successfully');
+  const saveIps = useApiMutation(
+    (ips: { ip: string; enabled: boolean }[]) => groupsApi.syncIps(groupId, ips),
+    {
+      success: 'Target IPs synchronized successfully',
+      error: 'Failed to synchronize IPs',
+      onSuccess: () => {
+        setDirty(false);
         onRefresh();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to synchronize IPs');
-      }
-    } catch (e) {
-      toast.error('Connection error while saving IPs');
-    } finally {
-      setSaving(false);
+      },
     }
+  );
+
+  const handleSaveBatch = () => {
+    saveIps.mutate(localIps.map((ip) => ({ ip: ip.ip, enabled: ip.enabled })));
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '24px' }}>
+    <div className="glass-panel panel-pad">
       <div className="flex-between" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h3 className="font-title" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
             Target Node IPs
           </h3>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Destination servers monitored for this target group.
           </p>
         </div>
@@ -134,7 +131,7 @@ export const GroupIps: React.FC<GroupIpsProps> = ({
             <Button
               variant="success"
               size="sm"
-              loading={saving}
+              loading={saveIps.isPending}
               icon={<CheckIcon size={14} />}
               onClick={handleSaveBatch}
             >

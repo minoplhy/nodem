@@ -1,31 +1,23 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { fn, API_URL, BASE_PATH } from '../core';
-import type { ECHCluster, ECHNode, ECHClusterNode, ECHDomain, ECHLog, DnsProviderConfig, TargetGroup, ServerPublicKeyInfo } from '../core';
+import React, { useEffect, useMemo, useReducer, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { BASE_PATH } from '../core';
+import { ech } from '../api/endpoints';
+import type { ECHCluster, ECHNode, ECHDomain } from '../api/types';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Button } from '../components/ui/Button';
 import { Tabs } from '../components/ui/Tabs';
 import { EmptyState } from '../components/ui/EmptyState';
-import {
-  KeyIcon,
-  PlusIcon,
-  RefreshIcon,
-  ServerIcon,
-  GlobeIcon,
-  ListIcon,
-} from '../components/icons/Icons';
-import { useToast } from '../hooks/useToast';
+import { KeyIcon, PlusIcon, RefreshIcon, ServerIcon, GlobeIcon, ListIcon } from '../components/icons/Icons';
 import { useConfirm } from '../hooks/useConfirm';
-import { usePolling } from '../hooks/usePolling';
+import { useApiMutation } from '../hooks/useApiMutation';
 
-// ECH modular components
-import { HPKE_CIPHER_SUITE_PRESETS } from '../components/ech/constants';
+import { useECHData } from '../components/ech/useECHData';
 import { ECHNodeList } from '../components/ech/ECHNodeList';
 import { ECHClusterBanner } from '../components/ech/ECHClusterBanner';
 import { ECHClusterNodes } from '../components/ech/ECHClusterNodes';
 import { ECHClusterDomains } from '../components/ech/ECHClusterDomains';
 import { ECHClusterLogs } from '../components/ech/ECHClusterLogs';
 
-// ECH modal dialogs
 import { ClusterModal } from '../components/ech/modals/ClusterModal';
 import { NodeRegisterModal } from '../components/ech/modals/NodeRegisterModal';
 import { ManageNodeClustersModal } from '../components/ech/modals/ManageNodeClustersModal';
@@ -33,233 +25,162 @@ import { AssignNodeModal } from '../components/ech/modals/AssignNodeModal';
 import { RevealTokenModal } from '../components/ech/modals/RevealTokenModal';
 import { DomainModal } from '../components/ech/modals/DomainModal';
 
-// Re-export constants for backward compatibility
-export { HPKE_CIPHER_SUITE_PRESETS };
+const CLUSTER_TABS = ['nodes', 'domains', 'logs'] as const;
+type ClusterTab = (typeof CLUSTER_TABS)[number];
 
-export const ECH: React.FC = () => {
-  const toast = useToast();
+function isClusterTab(t: string | undefined): t is ClusterTab {
+  return !!t && (CLUSTER_TABS as readonly string[]).includes(t);
+}
+
+// --- Modal state: at most one dialog is open at a time ---------------------
+
+interface RevealedToken {
+  token: string;
+  nodeName: string;
+  proxyType: string;
+  serverPublicKey?: string;
+}
+
+type ModalState =
+  | { kind: 'none' }
+  | { kind: 'cluster'; editing: ECHCluster | null }
+  | { kind: 'registerNode'; initialClusterId: number | null }
+  | { kind: 'revealToken'; revealed: RevealedToken }
+  | { kind: 'manageNode'; node: ECHNode }
+  | { kind: 'assignNode' }
+  | { kind: 'domain' };
+
+type ModalAction = { type: 'open'; modal: Exclude<ModalState, { kind: 'none' }> } | { type: 'close' };
+
+function modalReducer(_state: ModalState, action: ModalAction): ModalState {
+  return action.type === 'open' ? action.modal : { kind: 'none' };
+}
+
+// ---------------------------------------------------------------------------
+
+interface ECHProps {
+  /** Routed as /ech and /ech/clusters/:clusterId/:tab? ('clusters') or /ech/nodes ('nodes'). */
+  view: 'clusters' | 'nodes';
+}
+
+export const ECH: React.FC<ECHProps> = ({ view }) => {
   const confirm = useConfirm();
+  const navigate = useNavigate();
+  const params = useParams<{ clusterId?: string; tab?: string }>();
 
-  // Top-level tab: 'clusters' | 'nodes'
-  const [mainTab, setMainTab] = useState<'clusters' | 'nodes'>('clusters');
+  const paramClusterId = params.clusterId ? Number(params.clusterId) : null;
+  const activeTab: ClusterTab = isClusterTab(params.tab) ? params.tab : 'nodes';
 
-  // Primary data states
-  const [clusters, setClusters] = useState<ECHCluster[]>([]);
-  const [activeClusterId, setActiveClusterId] = useState<number | null>(null);
-  const [allNodes, setAllNodes] = useState<ECHNode[]>([]);
-  const [clusterNodes, setClusterNodes] = useState<ECHClusterNode[]>([]);
-  const [domains, setDomains] = useState<ECHDomain[]>([]);
-  const [logs, setLogs] = useState<ECHLog[]>([]);
-  const [providers, setProviders] = useState<DnsProviderConfig[]>([]);
-  const [groups, setGroups] = useState<TargetGroup[]>([]);
-  const [serverKeyInfo, setServerKeyInfo] = useState<ServerPublicKeyInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [rotating, setRotating] = useState(false);
-  const [refreshingLogs, setRefreshingLogs] = useState(false);
+  // Until the cluster list arrives, trust the URL so details load in parallel.
+  const [clusterListIds, setClusterListIds] = useState<number[] | null>(null);
+  const activeClusterId =
+    paramClusterId !== null && (clusterListIds === null || clusterListIds.includes(paramClusterId))
+      ? paramClusterId
+      : null;
+
+  const data = useECHData(activeClusterId, view);
+  const { clusters, allNodes, details, serverKeyInfo } = data;
+
+  useEffect(() => {
+    if (data.clustersLoaded) setClusterListIds(clusters.map((c) => c.id));
+  }, [data.clustersLoaded, clusters]);
+
+  // Normalise the URL: /ech (or a deleted cluster) -> first cluster.
+  useEffect(() => {
+    if (view !== 'clusters' || !data.clustersLoaded) return;
+    const valid = paramClusterId !== null && clusters.some((c) => c.id === paramClusterId);
+    if (valid) return;
+    if (clusters.length > 0) navigate(`/ech/clusters/${clusters[0].id}`, { replace: true });
+    else if (paramClusterId !== null) navigate('/ech', { replace: true });
+  }, [view, data.clustersLoaded, clusters, paramClusterId, navigate]);
+
+  const [modal, dispatch] = useReducer(modalReducer, { kind: 'none' });
+  const openModal = (m: Exclude<ModalState, { kind: 'none' }>) => dispatch({ type: 'open', modal: m });
+  const closeModal = () => dispatch({ type: 'close' });
+
   const [refreshingAll, setRefreshingAll] = useState(false);
+  const [refreshingLogs, setRefreshingLogs] = useState(false);
 
-  // Sub-tabs in Cluster view: 'nodes' | 'domains' | 'logs'
-  const [activeTab, setActiveTab] = useState<'nodes' | 'domains' | 'logs'>('nodes');
-
-  // Modal states
-  const [showClusterModal, setShowClusterModal] = useState(false);
-  const [editingCluster, setEditingCluster] = useState<ECHCluster | null>(null);
-
-  const [showNodeModal, setShowNodeModal] = useState(false);
-  const [nodeRegisterInitialClusterId, setNodeRegisterInitialClusterId] = useState<number | null>(null);
-
-  const [showTokenModal, setShowTokenModal] = useState(false);
-  const [revealedToken, setRevealedToken] = useState<string>('');
-  const [revealedNodeName, setRevealedNodeName] = useState<string>('');
-  const [revealedProxyType, setRevealedProxyType] = useState<string>('nginx');
-  const [revealedServerPublicKey, setRevealedServerPublicKey] = useState<string>('');
-
-  const [showManageClustersModal, setShowManageClustersModal] = useState(false);
-  const [managingNode, setManagingNode] = useState<ECHNode | null>(null);
-
-  const [showAssignNodeModal, setShowAssignNodeModal] = useState(false);
-  const [showDomainModal, setShowDomainModal] = useState(false);
-
-  const controlPlaneUrl = typeof window !== 'undefined' ? window.location.origin + (BASE_PATH ? BASE_PATH : '') : '';
-
-  // Fetch independent edge node fleet
-  const fetchNodes = useCallback(async () => {
-    try {
-      const res = await fn(`${API_URL}/ech/nodes`);
-      if (res.ok) {
-        const raw = await res.json();
-        setAllNodes(Array.isArray(raw) ? raw : []);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // Fetch all clusters
-  const fetchClusters = useCallback(async (silent = false) => {
-    try {
-      const res = await fn(`${API_URL}/ech/clusters`);
-      if (res.ok) {
-        const raw = await res.json();
-        const data: ECHCluster[] = Array.isArray(raw) ? raw : [];
-        setClusters(data);
-        if (data.length > 0) {
-          setActiveClusterId((prev) => {
-            if (prev && data.some((c) => c.id === prev)) return prev;
-            return data[0].id;
-          });
-        } else {
-          setActiveClusterId(null);
-        }
-      } else if (!silent) {
-        toast.error('Failed to load ECH clusters');
-      }
-    } catch {
-      if (!silent) toast.error('Network error loading ECH clusters');
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  // Fetch secondary dropdown data (providers & target groups)
-  useEffect(() => {
-    fn(`${API_URL}/providers`)
-      .then((r) => r.ok && r.json())
-      .then((data) => setProviders(Array.isArray(data) ? data : []))
-      .catch(() => {});
-
-    fn(`${API_URL}/groups`)
-      .then((r) => r.ok && r.json())
-      .then((data) => setGroups(Array.isArray(data) ? data : []))
-      .catch(() => {});
-
-    fn(`${API_URL}/ech/server-key`)
-      .then((r) => r.ok && r.json())
-      .then((data) => setServerKeyInfo(data))
-      .catch(() => {});
-  }, []);
-
-  // Fetch cluster details (nodes, domains, logs)
-  const fetchClusterDetails = useCallback(async (clusterId: number, silent = false) => {
-    try {
-      const [nodesRes, domsRes, logsRes] = await Promise.all([
-        fn(`${API_URL}/ech/clusters/${clusterId}/nodes`),
-        fn(`${API_URL}/ech/clusters/${clusterId}/domains`),
-        fn(`${API_URL}/ech/clusters/${clusterId}/logs`),
-      ]);
-
-      if (nodesRes.ok) {
-        const nData = await nodesRes.json();
-        setClusterNodes(Array.isArray(nData) ? nData : []);
-      }
-      if (domsRes.ok) {
-        const dData = await domsRes.json();
-        setDomains(Array.isArray(dData) ? dData : []);
-      }
-      if (logsRes.ok) {
-        const lData = await logsRes.json();
-        setLogs(Array.isArray(lData) ? lData : []);
-      }
-    } catch {
-      if (!silent) toast.error('Failed to load cluster details');
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    fetchClusters();
-    fetchNodes();
-  }, [fetchClusters, fetchNodes]);
-
-  useEffect(() => {
-    if (activeClusterId) {
-      fetchClusterDetails(activeClusterId);
-    } else {
-      setClusterNodes([]);
-      setDomains([]);
-      setLogs([]);
-    }
-  }, [activeClusterId, fetchClusterDetails]);
-
-  // Manual refresh specifically for active cluster details & logs
-  const handleRefreshLogs = useCallback(async () => {
-    if (!activeClusterId) return;
-    setRefreshingLogs(true);
-    await fetchClusterDetails(activeClusterId, false);
-    setRefreshingLogs(false);
-  }, [activeClusterId, fetchClusterDetails]);
-
-  // Full manual refresh handler for ECH
-  const handleManualRefreshAll = useCallback(async () => {
-    setRefreshingAll(true);
-    if (mainTab === 'nodes') {
-      await fetchNodes();
-    } else if (activeClusterId) {
-      await Promise.all([
-        fetchClusters(false),
-        fetchClusterDetails(activeClusterId, false),
-        fetchNodes(),
-      ]);
-    } else {
-      await Promise.all([fetchClusters(false), fetchNodes()]);
-    }
-    setRefreshingAll(false);
-  }, [mainTab, activeClusterId, fetchClusters, fetchClusterDetails, fetchNodes]);
-
-  // Scheduled polling callback matching Dashboard.tsx
-  const pollData = useCallback(async () => {
-    if (mainTab === 'nodes') {
-      await fetchNodes();
-    } else if (mainTab === 'clusters' && activeClusterId) {
-      await Promise.all([
-        fetchClusterDetails(activeClusterId, true),
-        fetchClusters(true),
-        fetchNodes(),
-      ]);
-    }
-  }, [mainTab, activeClusterId, fetchNodes, fetchClusterDetails, fetchClusters]);
-
-  // Poll every 5s with visibility-state awareness
-  usePolling(pollData, 5000, true);
-
+  const controlPlaneUrl = window.location.origin + BASE_PATH;
   const activeCluster = clusters.find((c) => c.id === activeClusterId);
 
-  // --- Cluster Handlers ---
-  const handleOpenCreateCluster = () => {
-    setEditingCluster(null);
-    setShowClusterModal(true);
+  const availableNodes = useMemo(
+    () => allNodes.filter((n) => !details.nodes.some((cn) => cn.node_id === n.id)),
+    [allNodes, details.nodes]
+  );
+
+  const goToCluster = (id: number, tab: ClusterTab = activeTab) =>
+    navigate(`/ech/clusters/${id}${tab === 'nodes' ? '' : `/${tab}`}`);
+
+  // --- Mutations ---
+
+  const deleteCluster = useApiMutation((c: ECHCluster) => ech.clusters.remove(c.id), {
+    success: 'Cluster deleted',
+    error: 'Failed to delete cluster',
+    onSuccess: () => {
+      data.refetchClusters();
+    },
+  });
+
+  const rotateKeys = useApiMutation((c: ECHCluster) => ech.clusters.rotate(c.id), {
+    success: (r) => `ECH Key successfully rotated to Version ${r.version}!`,
+    error: 'Rotation failed',
+    onSuccess: async () => {
+      await Promise.all([data.refetchClusters(), data.refetchDetails()]);
+    },
+  });
+
+  const deleteNode = useApiMutation((node: ECHNode) => ech.nodes.remove(node.id), {
+    success: 'Node deleted',
+    error: 'Failed to delete node',
+    onSuccess: data.refreshNodes,
+  });
+
+  const unassignNode = useApiMutation(
+    (clusterId: number, nodeId: number) => ech.clusters.unassignNode(clusterId, nodeId),
+    {
+      success: 'Node unassigned from cluster',
+      error: 'Failed to unassign node',
+      onSuccess: data.refreshNodes,
+    }
+  );
+
+  const deleteDomain = useApiMutation((dom: ECHDomain) => ech.removeDomain(dom.id), {
+    success: 'Domain unmapped',
+    error: 'Failed to unmap domain',
+    onSuccess: () => {
+      data.refetchDetails();
+    },
+  });
+
+  // --- Handlers ---
+
+  const handleManualRefreshAll = async () => {
+    setRefreshingAll(true);
+    await data.refreshAll();
+    setRefreshingAll(false);
   };
 
-  const handleOpenEditCluster = (c: ECHCluster) => {
-    setEditingCluster(c);
-    setShowClusterModal(true);
+  const handleRefreshLogs = async () => {
+    setRefreshingLogs(true);
+    await data.refetchDetails();
+    setRefreshingLogs(false);
   };
 
   const handleClusterSaved = async (saved: ECHCluster, isEdit: boolean) => {
-    await fetchClusters();
-    if (!isEdit) {
-      setActiveClusterId(saved.id);
-    }
+    await data.refetchClusters();
+    if (!isEdit) goToCluster(saved.id, 'nodes');
   };
 
   const handleDeleteCluster = async (c: ECHCluster) => {
     const ok = await confirm({
       title: `Delete Cluster '${c.name}'?`,
-      message: 'This will permanently remove the cluster, all associated keys, node credentials, and domain bindings.',
+      message:
+        'This will permanently remove the cluster, all associated keys, node credentials, and domain bindings.',
       confirmText: 'Delete Cluster',
+      danger: true,
     });
-    if (!ok) return;
-
-    try {
-      const res = await fn(`${API_URL}/ech/clusters/${c.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Cluster deleted');
-        fetchClusters();
-      } else {
-        toast.error('Failed to delete cluster');
-      }
-    } catch {
-      toast.error('Network error deleting cluster');
-    }
+    if (ok) await deleteCluster.mutate(c);
   };
 
   const handleTriggerRotation = async () => {
@@ -269,43 +190,21 @@ export const ECH: React.FC = () => {
       message: `This will immediately generate a new ECH key pair (Version ${activeCluster.current_version + 1}) for cover name '${activeCluster.public_name}'. Registered edge nodes must pull and ACK the new version before DNS records are synced.`,
       confirmText: 'Rotate Keys',
     });
-    if (!ok) return;
-
-    setRotating(true);
-    try {
-      const res = await fn(`${API_URL}/ech/clusters/${activeCluster.id}/rotate`, { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        toast.success(`ECH Key successfully rotated to Version ${data.version}!`);
-        await fetchClusters();
-        await fetchClusterDetails(activeCluster.id);
-      } else {
-        const err = await res.text();
-        toast.error(`Rotation failed: ${err}`);
-      }
-    } catch {
-      toast.error('Network error during rotation');
-    } finally {
-      setRotating(false);
-    }
-  };
-
-  // --- Node Handlers ---
-  const handleOpenRegisterNode = (preselectedClusterId?: number) => {
-    setNodeRegisterInitialClusterId(preselectedClusterId ?? null);
-    setShowNodeModal(true);
+    if (ok) await rotateKeys.mutate(activeCluster);
   };
 
   const handleNodeRegistered = (nodeName: string, token?: string, proxyType?: string, serverPubKey?: string) => {
-    fetchNodes();
-    if (activeClusterId) fetchClusterDetails(activeClusterId);
-
+    data.refreshNodes();
     if (token) {
-      setRevealedToken(token);
-      setRevealedNodeName(nodeName);
-      setRevealedProxyType(proxyType || 'nginx');
-      setRevealedServerPublicKey(serverPubKey || serverKeyInfo?.server_public_key || '');
-      setShowTokenModal(true);
+      openModal({
+        kind: 'revealToken',
+        revealed: {
+          token,
+          nodeName,
+          proxyType: proxyType || 'nginx',
+          serverPublicKey: serverPubKey || serverKeyInfo?.server_public_key,
+        },
+      });
     }
   };
 
@@ -314,74 +213,19 @@ export const ECH: React.FC = () => {
       title: `Delete Node '${node.name}'?`,
       message: 'This node will be permanently deleted and will no longer be permitted to pull keys for any cluster.',
       confirmText: 'Delete Node',
+      danger: true,
     });
-    if (!ok) return;
-
-    try {
-      const res = await fn(`${API_URL}/ech/nodes/${node.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Node deleted');
-        fetchNodes();
-        if (activeClusterId) fetchClusterDetails(activeClusterId);
-      } else {
-        toast.error('Failed to delete node');
-      }
-    } catch {
-      toast.error('Network error deleting node');
-    }
-  };
-
-  const handleOpenManageClusters = (node: ECHNode) => {
-    setManagingNode(node);
-    setShowManageClustersModal(true);
-  };
-
-  const handleClustersManaged = () => {
-    fetchNodes();
-    if (activeClusterId) fetchClusterDetails(activeClusterId);
-  };
-
-  const handleOpenAssignExistingNode = () => {
-    setShowAssignNodeModal(true);
-  };
-
-  const handleNodeAssigned = () => {
-    if (activeClusterId) fetchClusterDetails(activeClusterId);
-    fetchNodes();
+    if (ok) await deleteNode.mutate(node);
   };
 
   const handleUnassignNodeFromCluster = async (nodeId: number, nodeName: string) => {
-    if (!activeClusterId) return;
+    if (!activeCluster) return;
     const ok = await confirm({
-      title: `Unassign '${nodeName}' from '${activeCluster?.name}'?`,
+      title: `Unassign '${nodeName}' from '${activeCluster.name}'?`,
       message: 'The edge node will no longer pull or stage ECH keys for this cluster.',
       confirmText: 'Unassign Node',
     });
-    if (!ok) return;
-
-    try {
-      const res = await fn(`${API_URL}/ech/clusters/${activeClusterId}/nodes/${nodeId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        toast.success('Node unassigned from cluster');
-        fetchClusterDetails(activeClusterId);
-        fetchNodes();
-      } else {
-        toast.error('Failed to unassign node');
-      }
-    } catch {
-      toast.error('Network error unassigning node');
-    }
-  };
-
-  // --- Domain Handlers ---
-  const handleOpenAddDomain = () => {
-    setShowDomainModal(true);
-  };
-
-  const handleDomainAdded = () => {
-    if (activeClusterId) fetchClusterDetails(activeClusterId);
+    if (ok) await unassignNode.mutate(activeCluster.id, nodeId);
   };
 
   const handleDeleteDomain = async (dom: ECHDomain) => {
@@ -390,27 +234,11 @@ export const ECH: React.FC = () => {
       message: 'Automatic RFC 9460 HTTPS record synchronization for this domain will cease.',
       confirmText: 'Unmap Domain',
     });
-    if (!ok) return;
-
-    try {
-      const res = await fn(`${API_URL}/ech/domains/${dom.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Domain unmapped');
-        if (activeClusterId) fetchClusterDetails(activeClusterId);
-      } else {
-        toast.error('Failed to unmap domain');
-      }
-    } catch {
-      toast.error('Network error deleting domain');
-    }
+    if (ok) await deleteDomain.mutate(dom);
   };
 
-  if (loading) {
-    return (
-      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-        Loading ECH Management Subsystem...
-      </div>
-    );
+  if (data.clustersLoading) {
+    return <div className="page-loading">Loading ECH Management Subsystem...</div>;
   }
 
   return (
@@ -419,7 +247,7 @@ export const ECH: React.FC = () => {
         title="ECH KEY MANAGER"
         subtitle="Decoupled edge node fleet, cryptographic TLS 1.3 Encrypted Client Hello key rotation, and Two-Phase DNS synchronization."
       >
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="row gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -429,13 +257,13 @@ export const ECH: React.FC = () => {
           >
             Refresh
           </Button>
-          {mainTab === 'clusters' ? (
+          {view === 'clusters' ? (
             <>
               {activeCluster && (
                 <Button
                   variant="secondary"
                   size="sm"
-                  loading={rotating}
+                  loading={rotateKeys.isPending}
                   icon={<RefreshIcon size={14} />}
                   onClick={handleTriggerRotation}
                 >
@@ -446,7 +274,7 @@ export const ECH: React.FC = () => {
                 variant="primary"
                 size="sm"
                 icon={<PlusIcon size={14} />}
-                onClick={handleOpenCreateCluster}
+                onClick={() => openModal({ kind: 'cluster', editing: null })}
               >
                 New Cluster
               </Button>
@@ -456,7 +284,7 @@ export const ECH: React.FC = () => {
               variant="primary"
               size="sm"
               icon={<PlusIcon size={14} />}
-              onClick={() => handleOpenRegisterNode()}
+              onClick={() => openModal({ kind: 'registerNode', initialClusterId: null })}
             >
               Register Edge Node
             </Button>
@@ -464,114 +292,102 @@ export const ECH: React.FC = () => {
         </div>
       </SectionHeader>
 
-      {/* Top-Level Navigation: Clusters vs Edge Nodes */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '1.25rem' }}>
+      {/* Top-level navigation: Clusters vs Edge Nodes */}
+      <div className="pill-tabs">
         <button
           type="button"
-          className={`tab-item ${mainTab === 'clusters' ? 'active' : ''}`}
-          style={{ borderRadius: 'var(--radius-full)', padding: '6px 18px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
-          onClick={() => setMainTab('clusters')}
+          className={`tab-item pill-tab ${view === 'clusters' ? 'active' : ''}`}
+          onClick={() => navigate('/ech')}
         >
           <KeyIcon size={15} />
           <span>Clusters</span>
-          <span className="badge badge-up" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>{clusters.length}</span>
+          <span className="badge badge-up badge-count">{clusters.length}</span>
         </button>
         <button
           type="button"
-          className={`tab-item ${mainTab === 'nodes' ? 'active' : ''}`}
-          style={{ borderRadius: 'var(--radius-full)', padding: '6px 18px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
-          onClick={() => setMainTab('nodes')}
+          className={`tab-item pill-tab ${view === 'nodes' ? 'active' : ''}`}
+          onClick={() => navigate('/ech/nodes')}
         >
           <ServerIcon size={15} />
           <span>Edge Nodes</span>
-          <span className="badge badge-up" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>{allNodes.length}</span>
+          <span className="badge badge-up badge-count">{allNodes.length}</span>
         </button>
       </div>
 
-      {/* VIEW 1: INDEPENDENT EDGE NODES FLEET */}
-      {mainTab === 'nodes' && (
+      {view === 'nodes' && (
         <ECHNodeList
           nodes={allNodes}
           controlPlaneUrl={controlPlaneUrl}
           serverPublicKey={serverKeyInfo?.server_public_key}
-          onRegisterNode={() => handleOpenRegisterNode()}
-          onManageClusters={handleOpenManageClusters}
+          onRegisterNode={() => openModal({ kind: 'registerNode', initialClusterId: null })}
+          onManageClusters={(node) => openModal({ kind: 'manageNode', node })}
           onDeleteNode={handleDeleteNode}
         />
       )}
 
-      {/* VIEW 2: CLUSTERS VIEW */}
-      {mainTab === 'clusters' && (
-        clusters.length > 0 ? (
+      {view === 'clusters' &&
+        (clusters.length > 0 ? (
           <>
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', marginBottom: '1.25rem', paddingBottom: '4px' }}>
+            <div className="pill-tabs">
               {clusters.map((c) => (
                 <button
                   key={c.id}
                   type="button"
-                  className={`tab-item ${c.id === activeClusterId ? 'active' : ''}`}
-                  style={{ borderRadius: 'var(--radius-full)', padding: '6px 16px', whiteSpace: 'nowrap' }}
-                  onClick={() => setActiveClusterId(c.id)}
+                  className={`tab-item pill-tab ${c.id === activeClusterId ? 'active' : ''}`}
+                  onClick={() => goToCluster(c.id)}
                 >
-                  <KeyIcon size={14} style={{ marginRight: '6px' }} />
+                  <KeyIcon size={14} />
                   <span>{c.name}</span>
-                  <span className="badge badge-up" style={{ fontSize: '0.7rem', padding: '1px 6px', marginLeft: '6px' }}>
-                    v{c.current_version}
-                  </span>
+                  <span className="badge badge-up badge-count">v{c.current_version}</span>
                 </button>
               ))}
             </div>
 
             {activeCluster && (
               <>
-                {/* Cluster Overview Banner */}
                 <ECHClusterBanner
                   cluster={activeCluster}
-                  onEdit={handleOpenEditCluster}
+                  onEdit={(c) => openModal({ kind: 'cluster', editing: c })}
                   onDelete={handleDeleteCluster}
                 />
 
-                {/* Subtabs for Active Cluster */}
                 <Tabs
                   tabs={[
-                    { id: 'nodes', label: `Edge Nodes (${clusterNodes.length})`, icon: <ServerIcon size={16} /> },
-                    { id: 'domains', label: `Mapped Domains (${domains.length})`, icon: <GlobeIcon size={16} /> },
-                    { id: 'logs', label: `Audit Logs (${logs.length})`, icon: <ListIcon size={16} /> },
+                    { id: 'nodes', label: `Edge Nodes (${details.nodes.length})`, icon: <ServerIcon size={16} /> },
+                    { id: 'domains', label: `Mapped Domains (${details.domains.length})`, icon: <GlobeIcon size={16} /> },
+                    { id: 'logs', label: `Audit Logs (${details.logs.length})`, icon: <ListIcon size={16} /> },
                   ]}
                   activeTab={activeTab}
-                  onChange={(tabId) => setActiveTab(tabId as any)}
+                  onChange={(tab) =>
+                    navigate(`/ech/clusters/${activeCluster.id}${tab === 'nodes' ? '' : `/${tab}`}`, {
+                      replace: true,
+                    })
+                  }
                   className="mb-4"
                 />
 
-                {/* TAB 1: NODES FOR ACTIVE CLUSTER */}
                 {activeTab === 'nodes' && (
                   <ECHClusterNodes
                     cluster={activeCluster}
-                    clusterNodes={clusterNodes}
-                    onOpenAssign={handleOpenAssignExistingNode}
-                    onOpenRegister={() => handleOpenRegisterNode(activeCluster.id)}
+                    clusterNodes={details.nodes}
+                    onOpenAssign={() => openModal({ kind: 'assignNode' })}
+                    onOpenRegister={() => openModal({ kind: 'registerNode', initialClusterId: activeCluster.id })}
                     onUnassignNode={handleUnassignNodeFromCluster}
                   />
                 )}
 
-                {/* TAB 2: DOMAINS */}
                 {activeTab === 'domains' && (
                   <ECHClusterDomains
-                    domains={domains}
-                    providers={providers}
-                    groups={groups}
-                    onOpenAddDomain={handleOpenAddDomain}
+                    domains={details.domains}
+                    providers={data.providers}
+                    groups={data.groups}
+                    onOpenAddDomain={() => openModal({ kind: 'domain' })}
                     onDeleteDomain={handleDeleteDomain}
                   />
                 )}
 
-                {/* TAB 3: AUDIT LOGS */}
                 {activeTab === 'logs' && (
-                  <ECHClusterLogs
-                    logs={logs}
-                    loading={refreshingLogs}
-                    onRefresh={handleRefreshLogs}
-                  />
+                  <ECHClusterLogs logs={details.logs} loading={refreshingLogs} onRefresh={handleRefreshLogs} />
                 )}
               </>
             )}
@@ -582,60 +398,63 @@ export const ECH: React.FC = () => {
             title="No ECH Clusters Configured"
             description="Create an ECH Cluster to begin generating TLS 1.3 Encrypted Client Hello keys, deploying them to edge proxies, and publishing RFC 9460 HTTPS records."
             actionLabel="Create ECH Cluster"
-            onAction={handleOpenCreateCluster}
+            onAction={() => openModal({ kind: 'cluster', editing: null })}
           />
-        )
-      )}
+        ))}
 
       {/* --- MODALS --- */}
       <ClusterModal
-        open={showClusterModal}
-        editingCluster={editingCluster}
-        onClose={() => setShowClusterModal(false)}
+        open={modal.kind === 'cluster'}
+        editingCluster={modal.kind === 'cluster' ? modal.editing : null}
+        onClose={closeModal}
         onSuccess={handleClusterSaved}
       />
 
       <NodeRegisterModal
-        open={showNodeModal}
+        open={modal.kind === 'registerNode'}
         clusters={clusters}
-        initialClusterId={nodeRegisterInitialClusterId}
-        onClose={() => setShowNodeModal(false)}
+        initialClusterId={modal.kind === 'registerNode' ? modal.initialClusterId : null}
+        onClose={closeModal}
         onSuccess={handleNodeRegistered}
       />
 
       <ManageNodeClustersModal
-        open={showManageClustersModal}
-        node={managingNode}
+        open={modal.kind === 'manageNode'}
+        node={modal.kind === 'manageNode' ? modal.node : null}
         clusters={clusters}
-        onClose={() => setShowManageClustersModal(false)}
-        onSuccess={handleClustersManaged}
+        onClose={closeModal}
+        onSuccess={data.refreshNodes}
       />
 
       <AssignNodeModal
-        open={showAssignNodeModal}
+        open={modal.kind === 'assignNode'}
         cluster={activeCluster || null}
-        availableNodes={allNodes.filter((n) => !clusterNodes.some((cn) => cn.node_id === n.id))}
-        onClose={() => setShowAssignNodeModal(false)}
-        onSuccess={handleNodeAssigned}
+        availableNodes={availableNodes}
+        onClose={closeModal}
+        onSuccess={data.refreshNodes}
       />
 
       <RevealTokenModal
-        open={showTokenModal}
-        token={revealedToken}
-        nodeName={revealedNodeName}
-        proxyType={revealedProxyType}
+        open={modal.kind === 'revealToken'}
+        token={modal.kind === 'revealToken' ? modal.revealed.token : ''}
+        nodeName={modal.kind === 'revealToken' ? modal.revealed.nodeName : ''}
+        proxyType={modal.kind === 'revealToken' ? modal.revealed.proxyType : 'nginx'}
         controlPlaneUrl={controlPlaneUrl}
-        serverPublicKey={revealedServerPublicKey || serverKeyInfo?.server_public_key}
-        onClose={() => setShowTokenModal(false)}
+        serverPublicKey={
+          (modal.kind === 'revealToken' && modal.revealed.serverPublicKey) || serverKeyInfo?.server_public_key
+        }
+        onClose={closeModal}
       />
 
       <DomainModal
-        open={showDomainModal}
+        open={modal.kind === 'domain'}
         clusterId={activeClusterId}
-        providers={providers}
-        groups={groups}
-        onClose={() => setShowDomainModal(false)}
-        onSuccess={handleDomainAdded}
+        providers={data.providers}
+        groups={data.groups}
+        onClose={closeModal}
+        onSuccess={() => {
+          data.refetchDetails();
+        }}
       />
     </>
   );

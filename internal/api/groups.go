@@ -66,7 +66,7 @@ func (s *AppState) ListGroups(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, list)
+	RespondList(w, http.StatusOK, list)
 }
 
 func (s *AppState) CreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +209,7 @@ func (s *AppState) TestGroupConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	RespondJSON(w, http.StatusOK, results)
+	RespondList(w, http.StatusOK, results)
 }
 
 func (s *AppState) GetGroupStatus(w http.ResponseWriter, r *http.Request) {
@@ -265,10 +265,10 @@ func (s *AppState) GetGroupStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RespondJSON(w, http.StatusOK, GroupStatusResponse{
-		IPs:          ips,
-		Checks:       checks,
-		States:       states,
-		UnmanagedIPs: unmanagedIPs,
+		IPs:          emptyIfNil(ips),
+		Checks:       emptyIfNil(checks),
+		States:       emptyIfNil(states),
+		UnmanagedIPs: emptyIfNil(unmanagedIPs),
 	})
 }
 
@@ -325,10 +325,10 @@ func (s *AppState) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 
 	RespondJSON(w, http.StatusOK, GroupConfigResponse{
 		Group:         *group,
-		IPs:           ips,
-		Checks:        checks,
-		Rules:         rulesList,
-		Subscriptions: subscriptions,
+		IPs:           emptyIfNil(ips),
+		Checks:        emptyIfNil(checks),
+		Rules:         emptyIfNil(rulesList),
+		Subscriptions: emptyIfNil(subscriptions),
 	})
 }
 
@@ -387,10 +387,10 @@ func (s *AppState) GetAllGroupsStatus(w http.ResponseWriter, r *http.Request) {
 
 			mu.Lock()
 			statuses[strconv.FormatInt(group.ID, 10)] = GroupStatusResponse{
-				IPs:          ips,
-				Checks:       checks,
-				States:       states,
-				UnmanagedIPs: unmanagedIPs,
+				IPs:          emptyIfNil(ips),
+				Checks:       emptyIfNil(checks),
+				States:       emptyIfNil(states),
+				UnmanagedIPs: emptyIfNil(unmanagedIPs),
 			}
 			mu.Unlock()
 		}(g)
@@ -398,7 +398,7 @@ func (s *AppState) GetAllGroupsStatus(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	RespondJSON(w, http.StatusOK, UnifiedGroupsStatusResponse{
-		Groups:   groups,
+		Groups:   emptyIfNil(groups),
 		Statuses: statuses,
 	})
 }

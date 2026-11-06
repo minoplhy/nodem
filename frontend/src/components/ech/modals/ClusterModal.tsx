@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../../core';
-import type { ECHCluster } from '../../../core';
+import { ech } from '../../../api/endpoints';
+import type { ECHCluster, ECHClusterInput } from '../../../api/types';
 import { Modal } from '../../ui/Modal';
 import { Button } from '../../ui/Button';
 import { useToast } from '../../../hooks/useToast';
+import { useApiMutation } from '../../../hooks/useApiMutation';
 import { HPKE_CIPHER_SUITE_PRESETS } from '../constants';
 
 interface ClusterModalProps {
@@ -28,7 +29,18 @@ export const ClusterModal: React.FC<ClusterModalProps> = ({
   const [maxNameLen, setMaxNameLen] = useState(0);
   const [rotationHours, setRotationHours] = useState(24);
   const [autoRotate, setAutoRotate] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+
+  const saveCluster = useApiMutation(
+    (id: number | null, body: ECHClusterInput) => (id ? ech.clusters.update(id, body) : ech.clusters.create(body)),
+    {
+      success: (_r, id) => (id ? 'Cluster updated' : 'ECH Cluster created successfully'),
+      error: 'Error saving cluster',
+      onSuccess: (saved, id) => {
+        onSuccess(saved, !!id);
+        onClose();
+      },
+    }
+  );
 
   useEffect(() => {
     if (open) {
@@ -65,43 +77,14 @@ export const ClusterModal: React.FC<ClusterModalProps> = ({
       toast.error('HPKE cipher suite cannot be empty');
       return;
     }
-    setSubmitting(true);
-
-    try {
-      const url = editingCluster
-        ? `${API_URL}/ech/clusters/${editingCluster.id}`
-        : `${API_URL}/ech/clusters`;
-      const method = editingCluster ? 'PUT' : 'POST';
-
-      const payload = {
-        name: clusterName.trim(),
-        public_name: publicName.trim(),
-        cipher_suite: finalSuite,
-        max_name_len: Number(maxNameLen),
-        rotation_interval_hours: Number(rotationHours),
-        auto_rotate: autoRotate,
-      };
-
-      const res = await fn(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingCluster ? 'Cluster updated' : 'ECH Cluster created successfully');
-        const saved: ECHCluster = await res.json();
-        onSuccess(saved, !!editingCluster);
-        onClose();
-      } else {
-        const err = await res.text();
-        toast.error(`Error saving cluster: ${err}`);
-      }
-    } catch {
-      toast.error('Failed to submit cluster');
-    } finally {
-      setSubmitting(false);
-    }
+    await saveCluster.mutate(editingCluster ? editingCluster.id : null, {
+      name: clusterName.trim(),
+      public_name: publicName.trim(),
+      cipher_suite: finalSuite,
+      max_name_len: Number(maxNameLen),
+      rotation_interval_hours: Number(rotationHours),
+      auto_rotate: autoRotate,
+    });
   };
 
   return (
@@ -201,7 +184,7 @@ export const ClusterModal: React.FC<ClusterModalProps> = ({
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" loading={submitting}>
+          <Button variant="primary" type="submit" loading={saveCluster.isPending}>
             {editingCluster ? 'Save Changes' : 'Create Cluster'}
           </Button>
         </div>

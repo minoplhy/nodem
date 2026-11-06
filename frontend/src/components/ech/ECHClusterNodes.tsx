@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ECHCluster, ECHClusterNode } from '../../core';
+import type { ECHCluster, ECHClusterNode } from '../../api/types';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
 import { ServerIcon, PlusIcon, TrashIcon } from '../icons/Icons';

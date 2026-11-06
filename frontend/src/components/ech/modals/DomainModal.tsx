@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../../core';
-import type { DnsProviderConfig, TargetGroup } from '../../../core';
+import { ech } from '../../../api/endpoints';
+import type { DnsProviderConfig, TargetGroup, ECHDomainInput } from '../../../api/types';
 import { Modal } from '../../ui/Modal';
 import { Button } from '../../ui/Button';
-import { useToast } from '../../../hooks/useToast';
+import { useApiMutation } from '../../../hooks/useApiMutation';
 
 interface DomainModalProps {
   open: boolean;
@@ -22,8 +22,6 @@ export const DomainModal: React.FC<DomainModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const toast = useToast();
-
   const [domainFqdn, setDomainFqdn] = useState('');
   const [dnsProviderId, setDnsProviderId] = useState<number | ''>('');
   const [targetGroupId, setTargetGroupId] = useState<number | ''>('');
@@ -31,7 +29,15 @@ export const DomainModal: React.FC<DomainModalProps> = ({
   const [domainAlpn, setDomainAlpn] = useState('h2,h3');
   const [ipv4Hint, setIpv4Hint] = useState('');
   const [ipv6Hint, setIpv6Hint] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+
+  const addDomain = useApiMutation((cid: number, body: ECHDomainInput) => ech.clusters.addDomain(cid, body), {
+    success: 'Domain mapped for ECH DNS management',
+    error: 'Error mapping domain',
+    onSuccess: () => {
+      onClose();
+      onSuccess();
+    },
+  });
 
   useEffect(() => {
     if (open) {
@@ -43,43 +49,22 @@ export const DomainModal: React.FC<DomainModalProps> = ({
       setIpv4Hint('');
       setIpv6Hint('');
     }
-  }, [open, providers]);
+    // Reset only when the dialog opens, not when the provider list refreshes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clusterId || !dnsProviderId) return;
-    setSubmitting(true);
-
-    try {
-      const payload = {
-        domain: domainFqdn.trim(),
-        dns_provider_id: Number(dnsProviderId),
-        target_group_id: targetGroupId ? Number(targetGroupId) : undefined,
-        ttl: Number(domainTtl),
-        alpn: domainAlpn.trim(),
-        ipv4_hint: ipv4Hint.trim() || undefined,
-        ipv6_hint: ipv6Hint.trim() || undefined,
-      };
-
-      const res = await fn(`${API_URL}/ech/clusters/${clusterId}/domains`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success('Domain mapped for ECH DNS management');
-        onClose();
-        onSuccess();
-      } else {
-        const err = await res.text();
-        toast.error(`Error mapping domain: ${err}`);
-      }
-    } catch {
-      toast.error('Failed to map domain');
-    } finally {
-      setSubmitting(false);
-    }
+    await addDomain.mutate(clusterId, {
+      domain: domainFqdn.trim(),
+      dns_provider_id: Number(dnsProviderId),
+      target_group_id: targetGroupId ? Number(targetGroupId) : undefined,
+      ttl: Number(domainTtl),
+      alpn: domainAlpn.trim(),
+      ipv4_hint: ipv4Hint.trim() || undefined,
+      ipv6_hint: ipv6Hint.trim() || undefined,
+    });
   };
 
   return (
@@ -181,7 +166,7 @@ export const DomainModal: React.FC<DomainModalProps> = ({
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" loading={submitting}>
+          <Button variant="primary" type="submit" loading={addDomain.isPending}>
             Map Domain
           </Button>
         </div>

@@ -1,62 +1,44 @@
-import React, { useState, useCallback } from 'react';
-import { fn, API_URL } from '../core';
-import type { TargetGroup, TargetIp, CheckConfig, CheckState, ECHCluster } from '../core';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { groups as groupsApi, ech } from '../api/endpoints';
+import type { DashboardData, ECHCluster } from '../api/types';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { RefreshIcon, ServerIcon, ExternalLinkIcon, AlertTriangleIcon, KeyIcon } from '../components/icons/Icons';
-import { usePolling } from '../hooks/usePolling';
+import { useApiQuery } from '../hooks/useApiQuery';
 
-interface DashboardProps {
-  onNavigateToTab: (tab: string) => void;
-  onManageGroup: (groupId: number) => void;
+interface DashboardSnapshot extends DashboardData {
+  echClusters: ECHCluster[];
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageGroup }) => {
-  const [groups, setGroups] = useState<TargetGroup[]>([]);
-  const [echClusters, setEchClusters] = useState<ECHCluster[]>([]);
-  const [statuses, setStatuses] = useState<
-    Record<number, { ips: TargetIp[]; checks: CheckConfig[]; states: CheckState[]; unmanaged_ips?: string[] }>
-  >({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+async function fetchDashboard(signal: AbortSignal): Promise<DashboardSnapshot> {
+  const [status, echClusters] = await Promise.all([
+    groupsApi.allStatus(signal),
+    // ECH is optional on the dashboard; don't fail the whole view over it.
+    ech.clusters.list(signal).catch(() => [] as ECHCluster[]),
+  ]);
+  return { ...status, echClusters };
+}
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [groupsRes, echRes] = await Promise.all([
-        fn(`${API_URL}/groups/status`),
-        fn(`${API_URL}/ech/clusters`),
-      ]);
+export const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const { data, error, refetch } = useApiQuery(fetchDashboard, [], { pollMs: 5000 });
+  const [refreshing, setRefreshing] = useState(false);
 
-      if (groupsRes.ok) {
-        const data = await groupsRes.json();
-        setGroups(data.groups || []);
-        setStatuses(data.statuses || {});
-        setError(false);
-      } else {
-        setError(true);
-      }
-
-      if (echRes.ok) {
-        const echData = await echRes.json();
-        setEchClusters(Array.isArray(echData) ? echData : []);
-      } else {
-        setEchClusters([]);
-      }
-    } catch (err) {
-      setError(true);
-    }
-  }, []);
-
-  // Poll every 5s with visibility-state awareness
-  usePolling(fetchData, 5000, true);
+  // Keep showing the last good snapshot while the backend is unreachable.
+  const groups = data?.groups ?? [];
+  const statuses = data?.statuses ?? {};
+  const echClusters = data?.echClusters ?? [];
 
   const handleManualRefresh = async () => {
-    setLoading(true);
-    await fetchData();
-    setLoading(false);
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
   };
+
+  const onManageGroup = (groupId: number) => navigate(`/groups/${groupId}`);
 
   // Calculate high-level summary metrics
   let totalNodes = 0;
@@ -90,7 +72,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
         <Button
           variant="secondary"
           size="sm"
-          loading={loading}
+          loading={refreshing}
           icon={<RefreshIcon size={14} />}
           onClick={handleManualRefresh}
         >
@@ -127,20 +109,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
         <div
           className="stat-card glass-panel"
           style={{ cursor: 'pointer', borderColor: 'var(--primary-glow)' }}
-          onClick={() => onNavigateToTab('ech')}
+          onClick={() => navigate('/ech')}
           title="Click to manage ECH Clusters"
         >
           <div className="stat-label" style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <KeyIcon size={14} />
             <span>ECH Clusters</span>
           </div>
-          <div className="stat-value" style={{ color: 'var(--primary)' }}>{echClusters?.length || 0}</div>
+          <div className="stat-value" style={{ color: 'var(--primary)' }}>{echClusters.length}</div>
           <div className="stat-meta">TLS 1.3 Key Rotation</div>
         </div>
       </div>
 
       {error && (
-        <div className="dns-anomaly-alert" style={{ marginBottom: '24px' }}>
+        <div className="dns-anomaly-alert mb-6">
           <AlertTriangleIcon size={18} />
           <div>Failed to connect to backend monitor service. Retrying in background...</div>
         </div>
@@ -152,7 +134,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
           title="No target groups configured"
           description="You have not added any target groups yet. Configure a target group to monitor nodes and automate DNS failover."
           actionLabel="Configure Groups"
-          onAction={() => onNavigateToTab('groups')}
+          onAction={() => navigate('/groups')}
         />
       ) : (
         <div className="group-cards-list">
@@ -240,7 +222,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigateToTab, onManageG
 
                           <div className="checks-stream">
                             {!status.checks || status.checks.length === 0 ? (
-                              <span className="text-xs" style={{ color: 'var(--text-faint)' }}>
+                              <span className="text-xs text-faint">
                                 No checks configured
                               </span>
                             ) : (

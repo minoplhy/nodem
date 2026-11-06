@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { CheckConfig } from '../../core';
+import type { CheckConfig } from '../../api/types';
 import { PlusIcon, TrashIcon, ChevronDownIcon, ChevronRightIcon } from '../icons/Icons';
 
 export type VisualNode =

@@ -1,38 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../core';
-import type { Session } from '../core';
+import React, { useState } from 'react';
+import { sessions as sessionsApi } from '../api/endpoints';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { Button } from '../components/ui/Button';
 import { ShieldIcon, RefreshIcon, TrashIcon } from '../components/icons/Icons';
-import { useToast } from '../hooks/useToast';
 import { useConfirm } from '../hooks/useConfirm';
+import { useApiQuery } from '../hooks/useApiQuery';
+import { useApiMutation } from '../hooks/useApiMutation';
 
 export const Sessions: React.FC = () => {
-  const toast = useToast();
   const confirm = useConfirm();
 
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: sessions = [],
+    isLoading: loading,
+    isFetching,
+    refetch,
+  } = useApiQuery((signal) => sessionsApi.list(signal), [], {
+    errorToast: 'Failed to load active sessions',
+  });
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
-  const fetchSessions = async () => {
-    try {
-      const res = await fn(`${API_URL}/sessions`);
-      if (res.ok) {
-        setSessions(await res.json());
-      } else {
-        toast.error('Failed to load active sessions');
-      }
-    } catch (e) {
-      toast.error('Connection error while fetching sessions');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSessions();
-  }, []);
+  const revokeSession = useApiMutation((id: string, _isCurrent: boolean) => sessionsApi.revoke(id), {
+    success: 'Session revoked',
+    error: 'Failed to revoke session',
+    onSuccess: (_r, _id, isCurrent) => {
+      if (isCurrent) window.location.reload();
+      else refetch();
+    },
+  });
 
   const handleRevoke = async (sessionId: string, isCurrent: boolean) => {
     const confirmed = await confirm({
@@ -46,23 +41,8 @@ export const Sessions: React.FC = () => {
     if (!confirmed) return;
 
     setRevokingId(sessionId);
-    try {
-      const res = await fn(`${API_URL}/sessions/${sessionId}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Session revoked');
-        if (isCurrent) {
-          window.location.reload();
-        } else {
-          fetchSessions();
-        }
-      } else {
-        toast.error('Failed to revoke session');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    } finally {
-      setRevokingId(null);
-    }
+    await revokeSession.mutate(sessionId, isCurrent);
+    setRevokingId(null);
   };
 
   const parseUserAgent = (ua?: string) => {
@@ -94,21 +74,21 @@ export const Sessions: React.FC = () => {
         <Button
           variant="secondary"
           size="sm"
-          loading={loading}
+          loading={isFetching}
           icon={<RefreshIcon size={14} />}
-          onClick={fetchSessions}
+          onClick={() => refetch()}
         >
           Refresh
         </Button>
       </SectionHeader>
 
-      <div className="glass-panel" style={{ padding: '24px' }}>
+      <div className="glass-panel panel-pad">
         <div className="flex-between" style={{ marginBottom: '16px' }}>
           <div>
             <h3 className="font-title" style={{ fontSize: '1.15rem', fontWeight: 700 }}>
               Logged-in Devices
             </h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-sm text-muted">
               All browser sessions currently authorized to access this account.
             </p>
           </div>
@@ -157,7 +137,7 @@ export const Sessions: React.FC = () => {
                           </div>
                           <div>
                             <strong>{parseUserAgent(s.user_agent)}</strong>
-                            <div className="font-mono text-xs" style={{ color: 'var(--text-faint)' }}>
+                            <div className="font-mono text-xs text-faint">
                               ID: {sid}
                             </div>
                           </div>
@@ -166,7 +146,7 @@ export const Sessions: React.FC = () => {
                       <td className="font-mono text-sm">
                         {s.ip_address || '—'}
                       </td>
-                      <td className="font-mono text-sm" style={{ color: 'var(--text-muted)' }}>
+                      <td className="font-mono text-sm text-muted">
                         {s.last_active
                           ? new Date(s.last_active).toLocaleString()
                           : 'Active now'}

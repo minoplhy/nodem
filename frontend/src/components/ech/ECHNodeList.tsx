@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { ECHNode } from '../../core';
+import type { ECHNode } from '../../api/types';
 import { EmptyState } from '../ui/EmptyState';
 import { Button } from '../ui/Button';
 import { ServerIcon, PlusIcon, LayersIcon, TrashIcon, TerminalIcon } from '../icons/Icons';

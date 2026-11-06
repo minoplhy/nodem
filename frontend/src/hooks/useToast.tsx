@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { CheckIcon, XIcon, AlertTriangleIcon, InfoIcon } from '../components/icons/Icons';
 
 export type ToastType = 'success' | 'error' | 'warn' | 'info';
@@ -9,18 +9,17 @@ export interface ToastItem {
   message: string;
 }
 
-interface ToastContextType {
-  toast: {
-    success: (message: string) => void;
-    error: (message: string) => void;
-    warn: (message: string) => void;
-    info: (message: string) => void;
-  };
-  toasts: ToastItem[];
-  removeToast: (id: string) => void;
+export interface ToastApi {
+  success: (message: string) => void;
+  error: (message: string) => void;
+  warn: (message: string) => void;
+  info: (message: string) => void;
 }
 
-const ToastContext = createContext<ToastContextType | null>(null);
+// Holds only the stable toast API. The toast list lives in provider-local state,
+// so showing/expiring a toast never changes this context value and never
+// re-renders (or re-triggers effects in) consumers.
+const ToastContext = createContext<ToastApi | null>(null);
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -38,15 +37,18 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, 4000);
   }, [removeToast]);
 
-  const toast = {
-    success: (msg: string) => addToast('success', msg),
-    error: (msg: string) => addToast('error', msg),
-    warn: (msg: string) => addToast('warn', msg),
-    info: (msg: string) => addToast('info', msg),
-  };
+  const toast = useMemo<ToastApi>(
+    () => ({
+      success: (msg: string) => addToast('success', msg),
+      error: (msg: string) => addToast('error', msg),
+      warn: (msg: string) => addToast('warn', msg),
+      info: (msg: string) => addToast('info', msg),
+    }),
+    [addToast]
+  );
 
   return (
-    <ToastContext.Provider value={{ toast, toasts, removeToast }}>
+    <ToastContext.Provider value={toast}>
       {children}
       <div className="toast-container" aria-live="polite">
         {toasts.map((t) => (
@@ -77,5 +79,5 @@ export function useToast() {
   if (!context) {
     throw new Error('useToast must be used within a ToastProvider');
   }
-  return context.toast;
+  return context;
 }

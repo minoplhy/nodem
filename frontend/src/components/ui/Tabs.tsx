@@ -1,20 +1,20 @@
 import React from 'react';
 
-export interface TabOption {
-  id: string;
+export interface TabOption<T extends string = string> {
+  id: T;
   label: string;
   icon?: React.ReactNode;
   badge?: number | string;
 }
 
-export interface TabsProps {
-  tabs: TabOption[];
-  activeTab: string;
-  onChange: (tabId: string) => void;
+export interface TabsProps<T extends string = string> {
+  tabs: TabOption<T>[];
+  activeTab: T;
+  onChange: (tabId: T) => void;
   className?: string;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ tabs, activeTab, onChange, className = '' }) => {
+export function Tabs<T extends string>({ tabs, activeTab, onChange, className = '' }: TabsProps<T>) {
   return (
     <div className={`tab-bar ${className}`} role="tablist">
       {tabs.map((tab) => {
@@ -22,6 +22,7 @@ export const Tabs: React.FC<TabsProps> = ({ tabs, activeTab, onChange, className
         return (
           <button
             key={tab.id}
+            type="button"
             role="tab"
             aria-selected={isActive}
             className={`tab-item ${isActive ? 'active' : ''}`}
@@ -29,14 +30,10 @@ export const Tabs: React.FC<TabsProps> = ({ tabs, activeTab, onChange, className
           >
             {tab.icon && <span className="tab-icon">{tab.icon}</span>}
             <span>{tab.label}</span>
-            {tab.badge !== undefined && (
-              <span className="badge badge-unknown" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>
-                {tab.badge}
-              </span>
-            )}
+            {tab.badge !== undefined && <span className="badge badge-unknown badge-count">{tab.badge}</span>}
           </button>
         );
       })}
     </div>
   );
-};
+}

@@ -27,5 +27,5 @@ func (s *AppState) GetGroupLogs(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, logs)
+	RespondList(w, http.StatusOK, logs)
 }

@@ -59,7 +59,7 @@ func (s *AppState) ListActiveSessions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	RespondJSON(w, http.StatusOK, response)
+	RespondList(w, http.StatusOK, response)
 }
 
 func (s *AppState) RevokeSession(w http.ResponseWriter, r *http.Request) {

@@ -23,7 +23,7 @@ func (s *AppState) ListProviders(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, list)
+	RespondList(w, http.StatusOK, list)
 }
 
 func (s *AppState) CreateProvider(w http.ResponseWriter, r *http.Request) {

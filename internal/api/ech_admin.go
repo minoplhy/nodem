@@ -31,7 +31,7 @@ func (s *AppState) ListECHClusters(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, clusters)
+	RespondList(w, http.StatusOK, clusters)
 }
 
 type CreateClusterRequest struct {
@@ -228,7 +228,7 @@ func (s *AppState) ListAllECHNodes(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, nodes)
+	RespondList(w, http.StatusOK, nodes)
 }
 
 // CreateIndependentECHNode handles POST /api/ech/nodes
@@ -391,7 +391,7 @@ func (s *AppState) ListECHNodesForCluster(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	RespondJSON(w, http.StatusOK, nodes)
+	RespondList(w, http.StatusOK, nodes)
 }
 
 // ListECHNodes aliases ListECHNodesForCluster for route compatibility
@@ -532,7 +532,7 @@ func (s *AppState) ListECHDomains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	RespondJSON(w, http.StatusOK, domains)
+	RespondList(w, http.StatusOK, domains)
 }
 
 // CreateECHDomain handles POST /api/ech/clusters/{id}/domains
@@ -589,7 +589,7 @@ func (s *AppState) ListECHLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	RespondJSON(w, http.StatusOK, logs)
+	RespondList(w, http.StatusOK, logs)
 }
 
 type ServerPublicKeyResponse struct {

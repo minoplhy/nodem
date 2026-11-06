@@ -37,7 +37,7 @@ func (s *AppState) ListNotificationChannels(w http.ResponseWriter, r *http.Reque
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, list)
+	RespondList(w, http.StatusOK, list)
 }
 
 func (s *AppState) CreateNotificationChannel(w http.ResponseWriter, r *http.Request) {

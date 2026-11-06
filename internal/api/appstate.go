@@ -32,6 +32,24 @@ func RespondJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
+// RespondList writes a JSON array response. A nil slice is encoded as []
+// instead of null, so clients can always treat list endpoints as arrays.
+func RespondList[T any](w http.ResponseWriter, status int, items []T) {
+	if items == nil {
+		items = []T{}
+	}
+	RespondJSON(w, status, items)
+}
+
+// emptyIfNil returns s, or an empty (non-nil) slice when s is nil, so that
+// slice fields in response structs encode as [] instead of null.
+func emptyIfNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
 // RespondError writes an API error response in the standard {"message": "..."} format.
 func RespondError(w http.ResponseWriter, status int, message string) {
 	if status >= 500 {

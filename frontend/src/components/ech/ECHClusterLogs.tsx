@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ECHLog } from '../../core';
+import type { ECHLog } from '../../api/types';
 import { EmptyState } from '../ui/EmptyState';
 import { Button } from '../ui/Button';
 import { ListIcon, RefreshIcon } from '../icons/Icons';

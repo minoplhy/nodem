@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { fn, API_URL } from '../core';
-import type { User } from '../core';
+import { auth } from '../api/endpoints';
+import { ApiError, NETWORK_ERROR_MESSAGE } from '../api/client';
+import type { User } from '../api/types';
 import { Button } from '../components/ui/Button';
 import { ShieldIcon } from '../components/icons/Icons';
 import { useToast } from '../hooks/useToast';
@@ -23,22 +24,15 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setLoading(true);
 
     try {
-      const res = await fn(`${API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, remember_me: rememberMe }),
-      });
-
-      if (res.ok) {
-        const user: User = await res.json();
-        toast.success(`Welcome back, ${user.username}!`);
-        onLoginSuccess(user);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.message || 'Invalid username or password');
-      }
+      const user = await auth.login({ username, password, remember_me: rememberMe });
+      toast.success(`Welcome back, ${user.username}!`);
+      onLoginSuccess(user);
     } catch (err) {
-      setError('Connection refused. Is the Node Monitor daemon running?');
+      if (err instanceof ApiError && err.status !== 0) {
+        setError(err.serverMessage || 'Invalid username or password');
+      } else {
+        setError(`${NETWORK_ERROR_MESSAGE}. Is the Node Monitor daemon running?`);
+      }
     } finally {
       setLoading(false);
     }
@@ -67,7 +61,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           <h1 className="font-title" style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '6px' }}>
             NODE MONITOR
           </h1>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Sign in to manage dynamic DNS clusters & health monitoring
           </p>
         </div>

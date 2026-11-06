@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../core';
-import type { TargetGroup, DnsProviderConfig } from '../../core';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { groups as groupsApi, providers as providersApi } from '../../api/endpoints';
+import type { TargetGroup, GroupInput } from '../../api/types';
 import { SectionHeader } from '../ui/SectionHeader';
 import { EmptyState } from '../ui/EmptyState';
 import { Modal } from '../ui/Modal';
@@ -8,22 +9,22 @@ import { Button } from '../ui/Button';
 import { PlusIcon, TrashIcon, EditIcon, ServerIcon, ExternalLinkIcon } from '../icons/Icons';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useApiMutation } from '../../hooks/useApiMutation';
 
-interface GroupListProps {
-  setOpenGroupId: (id: number | null) => void;
-  onNavigateToTab: (tab: string) => void;
-}
-
-export const GroupList: React.FC<GroupListProps> = ({
-  setOpenGroupId,
-  onNavigateToTab,
-}) => {
+/** Target group overview, routed at /groups. */
+export const GroupList: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
 
-  const [groups, setGroups] = useState<TargetGroup[]>([]);
-  const [providers, setProviders] = useState<DnsProviderConfig[]>([]);
-  const [loading, setLoading] = useState(true);
+  const groupsQuery = useApiQuery((signal) => groupsApi.list(signal), [], {
+    errorToast: 'Failed to load target groups',
+  });
+  const groups = groupsQuery.data ?? [];
+  const loading = groupsQuery.isLoading;
+  const refetchGroups = groupsQuery.refetch;
+  const { data: providers = [] } = useApiQuery((signal) => providersApi.list(signal), []);
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -33,40 +34,36 @@ export const GroupList: React.FC<GroupListProps> = ({
   const [dnsRecord, setDnsRecord] = useState('');
   const [dnsProviderId, setDnsProviderId] = useState('');
   const [intervalSecs, setIntervalSecs] = useState(60);
-  const [submitting, setSubmitting] = useState(false);
 
-  const fetchGroups = async () => {
-    try {
-      const res = await fn(`${API_URL}/groups`);
-      if (res.ok) {
-        setGroups(await res.json());
-      }
-    } catch (e) {
-      toast.error('Failed to load target groups');
-    } finally {
-      setLoading(false);
+  const saveGroup = useApiMutation(
+    (id: number | null, body: GroupInput) => (id ? groupsApi.update(id, body) : groupsApi.create(body)),
+    {
+      success: (_r, id) => (id ? 'Target group updated' : 'Target group created'),
+      error: 'Failed to save target group',
+      onSuccess: () => {
+        setShowModal(false);
+        refetchGroups();
+      },
     }
-  };
+  );
 
-  const fetchProviders = async () => {
-    try {
-      const res = await fn(`${API_URL}/providers`);
-      if (res.ok) {
-        const list: DnsProviderConfig[] = await res.json();
-        setProviders(list);
-        if (list.length > 0 && !dnsProviderId) {
-          setDnsProviderId(String(list[0].id));
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const deleteGroup = useApiMutation((id: number) => groupsApi.remove(id), {
+    success: 'Target group deleted',
+    error: 'Failed to delete target group',
+    onSuccess: () => {
+      refetchGroups();
+    },
+  });
 
-  useEffect(() => {
-    fetchGroups();
-    fetchProviders();
-  }, []);
+  const toggleGroup = useApiMutation((grp: TargetGroup) => groupsApi.toggle(grp.id, !grp.enabled), {
+    success: (_r, grp) => (!grp.enabled ? `Monitoring resumed for ${grp.name}` : `Monitoring paused for ${grp.name}`),
+    error: 'Failed to toggle group monitoring state',
+    onSuccess: (_r, grp) => {
+      groupsQuery.setData((prev) => prev?.map((g) => (g.id === grp.id ? { ...g, enabled: !grp.enabled } : g)));
+    },
+  });
+
+  const openGroup = (id: number) => navigate(`/groups/${id}`);
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -92,38 +89,12 @@ export const GroupList: React.FC<GroupListProps> = ({
       toast.error('Please configure at least one DNS Provider first.');
       return;
     }
-
-    setSubmitting(true);
-    try {
-      const url = editingId ? `${API_URL}/groups/${editingId}` : `${API_URL}/groups`;
-      const method = editingId ? 'PUT' : 'POST';
-
-      const payload = {
-        name,
-        dns_record: dnsRecord,
-        dns_provider_id: parseInt(dnsProviderId, 10),
-        check_interval_secs: Number(intervalSecs),
-      };
-
-      const res = await fn(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingId ? 'Target group updated' : 'Target group created');
-        setShowModal(false);
-        fetchGroups();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to save target group');
-      }
-    } catch (e) {
-      toast.error('Connection error while saving group');
-    } finally {
-      setSubmitting(false);
-    }
+    await saveGroup.mutate(editingId, {
+      name,
+      dns_record: dnsRecord,
+      dns_provider_id: parseInt(dnsProviderId, 10),
+      check_interval_secs: Number(intervalSecs),
+    });
   };
 
   const handleDelete = async (groupId: number, groupName: string) => {
@@ -133,40 +104,11 @@ export const GroupList: React.FC<GroupListProps> = ({
       confirmText: 'Delete',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/groups/${groupId}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Target group deleted');
-        fetchGroups();
-      } else {
-        toast.error('Failed to delete target group');
-      }
-    } catch (e) {
-      toast.error('Connection error while deleting group');
-    }
+    if (confirmed) await deleteGroup.mutate(groupId);
   };
 
-  const handleToggle = async (grp: TargetGroup) => {
-    const nextEnabled = !grp.enabled;
-    try {
-      const res = await fn(`${API_URL}/groups/${grp.id}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: nextEnabled }),
-      });
-      if (res.ok) {
-        setGroups((prev) =>
-          prev.map((g) => (g.id === grp.id ? { ...g, enabled: nextEnabled } : g))
-        );
-        toast.info(nextEnabled ? `Monitoring resumed for ${grp.name}` : `Monitoring paused for ${grp.name}`);
-      } else {
-        toast.error('Failed to toggle group monitoring state');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    }
+  const handleToggle = (grp: TargetGroup) => {
+    toggleGroup.mutate(grp);
   };
 
   const providerMap = new Map<number, string>(providers.map((p) => [p.id, p.name]));
@@ -208,7 +150,7 @@ export const GroupList: React.FC<GroupListProps> = ({
                         type="button"
                         className="group-name-link"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                        onClick={() => setOpenGroupId(group.id)}
+                        onClick={() => openGroup(group.id)}
                       >
                         <span>{group.name}</span>
                         <ExternalLinkIcon size={16} />
@@ -236,7 +178,7 @@ export const GroupList: React.FC<GroupListProps> = ({
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => setOpenGroupId(group.id)}
+                      onClick={() => openGroup(group.id)}
                     >
                       Manage
                     </Button>
@@ -275,7 +217,7 @@ export const GroupList: React.FC<GroupListProps> = ({
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleSubmit}>
+            <Button variant="primary" loading={saveGroup.isPending} onClick={handleSubmit}>
               {editingId ? 'Save Changes' : 'Create Group'}
             </Button>
           </>
@@ -318,7 +260,7 @@ export const GroupList: React.FC<GroupListProps> = ({
                     style={{ textDecoration: 'underline', color: 'var(--primary)' }}
                     onClick={() => {
                       setShowModal(false);
-                      onNavigateToTab('providers');
+                      navigate('/providers');
                     }}
                   >
                     Configure Providers &rarr;

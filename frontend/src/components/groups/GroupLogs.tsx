@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { fn, API_URL } from '../../core';
-import type { TargetIp, CheckLog, CheckConfig } from '../../core';
+import React, { useState } from 'react';
+import { groups as groupsApi } from '../../api/endpoints';
+import type { TargetIp, CheckConfig } from '../../api/types';
+import { useApiQuery } from '../../hooks/useApiQuery';
 import { Button } from '../ui/Button';
 import { RefreshIcon } from '../icons/Icons';
 
@@ -15,44 +16,28 @@ export const GroupLogs: React.FC<GroupLogsProps> = ({
   groupIps,
   groupChecks,
 }) => {
-  const [logs, setLogs] = useState<CheckLog[]>([]);
   const [selectedIpId, setSelectedIpId] = useState<string>('');
   const [limit, setLimit] = useState<number>(50);
-  const [loading, setLoading] = useState(false);
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true);
-    try {
-      let url = `${API_URL}/groups/${groupId}/logs?limit=${limit}`;
-      if (selectedIpId) {
-        url += `&ip_id=${selectedIpId}`;
-      }
-      const res = await fn(url);
-      if (res.ok) {
-        setLogs(await res.json());
-      }
-    } catch (e) {
-      console.error('Failed to fetch activity logs:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [groupId, selectedIpId, limit]);
-
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+  const {
+    data: logs = [],
+    isFetching: loading,
+    refetch,
+  } = useApiQuery((signal) => groupsApi.logs(groupId, { limit, ipId: selectedIpId }, signal), [groupId, selectedIpId, limit], {
+    errorToast: 'Failed to fetch activity logs',
+  });
 
   const checkMap = new Map<number, string>(groupChecks.map((c) => [c.id, c.name]));
   const ipMap = new Map<number, string>(groupIps.map((i) => [i.id, i.ip]));
 
   return (
-    <div className="glass-panel" style={{ padding: '24px' }}>
+    <div className="glass-panel panel-pad">
       <div className="flex-between" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h3 className="font-title" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
             Check Audit Logs
           </h3>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Historical health probe telemetry and network responses.
           </p>
         </div>
@@ -89,7 +74,7 @@ export const GroupLogs: React.FC<GroupLogsProps> = ({
             size="sm"
             loading={loading}
             icon={<RefreshIcon size={14} />}
-            onClick={fetchLogs}
+            onClick={() => refetch()}
           >
             Refresh
           </Button>
@@ -123,7 +108,7 @@ export const GroupLogs: React.FC<GroupLogsProps> = ({
 
                 return (
                   <tr key={log.id}>
-                    <td className="font-mono text-sm" style={{ color: 'var(--text-muted)' }}>
+                    <td className="font-mono text-sm text-muted">
                       {timeFormatted}
                     </td>
                     <td>

@@ -29,7 +29,7 @@ func (s *AppState) ListIPs(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, ips)
+	RespondList(w, http.StatusOK, ips)
 }
 
 func (s *AppState) AddIP(w http.ResponseWriter, r *http.Request) {

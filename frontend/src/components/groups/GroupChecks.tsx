@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { fn, API_URL } from '../../core';
-import type { CheckConfig } from '../../core';
+import { groups as groupsApi } from '../../api/endpoints';
+import type { CheckConfig, CheckInput } from '../../api/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { PlusIcon, TrashIcon, EditIcon } from '../icons/Icons';
-import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useApiMutation } from '../../hooks/useApiMutation';
+
+type Protocol = 'TCP' | 'UDP' | 'HTTP' | 'HTTPS';
 
 interface GroupChecksProps {
   groupId: number;
@@ -14,7 +16,6 @@ interface GroupChecksProps {
 }
 
 export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, onRefresh }) => {
-  const toast = useToast();
   const confirm = useConfirm();
 
   const [showModal, setShowModal] = useState(false);
@@ -22,14 +23,32 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
 
   // Form states
   const [name, setName] = useState('');
-  const [protocol, setProtocol] = useState<'TCP' | 'UDP' | 'HTTP' | 'HTTPS'>('TCP');
+  const [protocol, setProtocol] = useState<Protocol>('TCP');
   const [port, setPort] = useState(443);
   const [domain, setDomain] = useState('');
   const [path, setPath] = useState('');
   const [downThreshold, setDownThreshold] = useState(2);
   const [upThreshold, setUpThreshold] = useState(3);
   const [bypassGlobal, setBypassGlobal] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+
+  const saveCheck = useApiMutation(
+    (id: number | null, body: CheckInput) =>
+      id ? groupsApi.updateCheck(groupId, id, body) : groupsApi.addCheck(groupId, body),
+    {
+      success: (_r, id) => (id ? 'Check updated successfully' : 'Check added successfully'),
+      error: 'Failed to save health check',
+      onSuccess: () => {
+        setShowModal(false);
+        onRefresh();
+      },
+    }
+  );
+
+  const deleteCheck = useApiMutation((checkId: number) => groupsApi.removeCheck(groupId, checkId), {
+    success: 'Health check deleted',
+    error: 'Failed to delete health check',
+    onSuccess: onRefresh,
+  });
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -47,7 +66,7 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
   const handleOpenEdit = (check: CheckConfig) => {
     setEditingId(check.id);
     setName(check.name);
-    setProtocol(check.protocol as any);
+    setProtocol(check.protocol as Protocol);
     setPort(check.port);
     setDomain(check.domain || '');
     setPath(check.path || '');
@@ -57,7 +76,7 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
     setShowModal(true);
   };
 
-  const handleProtocolChange = (newProto: 'TCP' | 'UDP' | 'HTTP' | 'HTTPS') => {
+  const handleProtocolChange = (newProto: Protocol) => {
     setProtocol(newProto);
     if (newProto === 'HTTP') setPort(80);
     else if (newProto === 'HTTPS') setPort(443);
@@ -66,44 +85,16 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      const url = editingId
-        ? `${API_URL}/groups/${groupId}/checks/${editingId}`
-        : `${API_URL}/groups/${groupId}/checks`;
-      const method = editingId ? 'PUT' : 'POST';
-
-      const payload = {
-        name,
-        protocol,
-        port: Number(port),
-        domain: domain.trim() || null,
-        path: path.trim() || null,
-        down_threshold: Number(downThreshold),
-        up_threshold: Number(upThreshold),
-        bypass_on_global_failure: bypassGlobal,
-      };
-
-      const res = await fn(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingId ? 'Check updated successfully' : 'Check added successfully');
-        setShowModal(false);
-        onRefresh();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to save health check');
-      }
-    } catch (err) {
-      toast.error('Connection error while saving check');
-    } finally {
-      setSubmitting(false);
-    }
+    await saveCheck.mutate(editingId, {
+      name,
+      protocol,
+      port: Number(port),
+      domain: domain.trim() || null,
+      path: path.trim() || null,
+      down_threshold: Number(downThreshold),
+      up_threshold: Number(upThreshold),
+      bypass_on_global_failure: bypassGlobal,
+    });
   };
 
   const handleDelete = async (checkId: number, checkName: string) => {
@@ -113,29 +104,17 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
       confirmText: 'Delete',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/groups/${groupId}/checks/${checkId}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Health check deleted');
-        onRefresh();
-      } else {
-        toast.error('Failed to delete health check');
-      }
-    } catch (e) {
-      toast.error('Connection error while deleting check');
-    }
+    if (confirmed) await deleteCheck.mutate(checkId);
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '24px' }}>
+    <div className="glass-panel panel-pad">
       <div className="flex-between" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h3 className="font-title" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
             Health Checks
           </h3>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Probes run periodically against each target IP.
           </p>
         </div>
@@ -223,7 +202,7 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleSubmit}>
+            <Button variant="primary" loading={saveCheck.isPending} onClick={handleSubmit}>
               {editingId ? 'Save Changes' : 'Create Check'}
             </Button>
           </>
@@ -248,7 +227,7 @@ export const GroupChecks: React.FC<GroupChecksProps> = ({ groupId, groupChecks, 
               <select
                 className="form-select"
                 value={protocol}
-                onChange={(e) => handleProtocolChange(e.target.value as any)}
+                onChange={(e) => handleProtocolChange(e.target.value as Protocol)}
               >
                 <option value="TCP">TCP Socket</option>
                 <option value="HTTP">HTTP</option>

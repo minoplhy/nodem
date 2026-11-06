@@ -1578,3 +1578,100 @@ h1, h2, h3, h4, .font-title {
   border-color: rgba(16, 185, 129, 0.4);
   color: #34d399;
 }
+/* ==========================================================================
+   Layout & text utilities
+   (several of these were referenced throughout the app but never defined)
+   ========================================================================== */
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.flex-wrap { flex-wrap: wrap; }
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-2-5 { gap: 10px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+
+.mb-1 { margin-bottom: 4px; }
+.mb-6 { margin-bottom: 24px; }
+.mt-4 { margin-top: 16px; }
+.w-full { width: 100%; }
+
+.text-sm { font-size: 0.875rem; }
+.text-xs { font-size: 0.75rem; }
+.text-muted { color: var(--text-muted); }
+.text-faint { color: var(--text-faint); }
+
+.panel-pad { padding: 24px; }
+
+.btn-xs {
+  padding: 3px 8px;
+  font-size: 0.75rem;
+}
+
+.badge-count {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+}
+
+.link-button {
+  text-decoration: underline;
+  color: var(--primary);
+}
+
+.page-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 64px 0;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.connecting-panel {
+  padding: 36px 48px;
+  text-align: center;
+  color: var(--text-main);
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.back-link {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding-left: 0;
+}
+
+/* Pill-shaped tab buttons (ECH view switcher / cluster selector) */
+.pill-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 1.25rem;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pill-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-full);
+  padding: 6px 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}

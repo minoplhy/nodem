@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * usePolling executes callback immediately and then every intervalMs.
- * Pauses when document is hidden (background tab) to reduce server load,
- * and resumes immediately when the tab becomes visible.
+ * usePolling runs `callback` every `intervalMs` (and immediately, unless
+ * `immediate` is false). Ticks are skipped while the tab is hidden, and the
+ * callback runs once as soon as the tab becomes visible again.
  */
 export function usePolling(
   callback: () => void | Promise<void>,
   intervalMs: number = 5000,
-  enabled: boolean = true
+  enabled: boolean = true,
+  immediate: boolean = true
 ) {
   const savedCallback = useRef(callback);
 
@@ -19,30 +20,20 @@ export function usePolling(
   useEffect(() => {
     if (!enabled || intervalMs <= 0) return;
 
-    // Initial execution
-    savedCallback.current();
+    if (immediate) savedCallback.current();
 
-    let id: any = null;
-
-    const tick = () => {
+    const runIfVisible = () => {
       if (document.visibilityState === 'visible') {
         savedCallback.current();
       }
     };
 
-    id = setInterval(tick, intervalMs);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        savedCallback.current();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const id = setInterval(runIfVisible, intervalMs);
+    document.addEventListener('visibilitychange', runIfVisible);
 
     return () => {
-      if (id) clearInterval(id);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', runIfVisible);
     };
-  }, [intervalMs, enabled]);
+  }, [intervalMs, enabled, immediate]);
 }

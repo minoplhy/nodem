@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ECHCluster } from '../../core';
+import type { ECHCluster } from '../../api/types';
 import { Button } from '../ui/Button';
 import { EditIcon, TrashIcon } from '../icons/Icons';
 

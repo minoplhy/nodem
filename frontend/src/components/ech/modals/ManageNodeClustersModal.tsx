@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../../core';
-import type { ECHNode, ECHCluster } from '../../../core';
+import { ech } from '../../../api/endpoints';
+import type { ECHNode, ECHCluster } from '../../../api/types';
 import { Modal } from '../../ui/Modal';
 import { Button } from '../../ui/Button';
-import { useToast } from '../../../hooks/useToast';
+import { useApiMutation } from '../../../hooks/useApiMutation';
 
 interface ManageNodeClustersModalProps {
   open: boolean;
@@ -20,10 +20,16 @@ export const ManageNodeClustersModal: React.FC<ManageNodeClustersModalProps> = (
   onClose,
   onSuccess,
 }) => {
-  const toast = useToast();
-
   const [managingClusterIds, setManagingClusterIds] = useState<number[]>([]);
-  const [submitting, setSubmitting] = useState(false);
+
+  const saveClusters = useApiMutation((nodeId: number, ids: number[]) => ech.nodes.setClusters(nodeId, ids), {
+    success: 'Assigned clusters updated',
+    error: 'Failed to update clusters',
+    onSuccess: () => {
+      onClose();
+      onSuccess();
+    },
+  });
 
   useEffect(() => {
     if (open && node) {
@@ -34,28 +40,7 @@ export const ManageNodeClustersModal: React.FC<ManageNodeClustersModalProps> = (
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!node) return;
-    setSubmitting(true);
-
-    try {
-      const res = await fn(`${API_URL}/ech/nodes/${node.id}/clusters`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cluster_ids: managingClusterIds }),
-      });
-
-      if (res.ok) {
-        toast.success('Assigned clusters updated');
-        onClose();
-        onSuccess();
-      } else {
-        const err = await res.text();
-        toast.error(`Failed to update clusters: ${err}`);
-      }
-    } catch {
-      toast.error('Network error updating clusters');
-    } finally {
-      setSubmitting(false);
-    }
+    await saveClusters.mutate(node.id, managingClusterIds);
   };
 
   return (
@@ -102,7 +87,7 @@ export const ManageNodeClustersModal: React.FC<ManageNodeClustersModalProps> = (
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" loading={submitting}>
+          <Button variant="primary" type="submit" loading={saveClusters.isPending}>
             Save Cluster Assignments
           </Button>
         </div>

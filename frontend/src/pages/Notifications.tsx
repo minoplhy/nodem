@@ -1,20 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../core';
-import type { NotificationChannel } from '../core';
+import React, { useState } from 'react';
+import { notifications as notificationsApi } from '../api/endpoints';
+import type { NotificationChannel, ChannelInput } from '../api/types';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
 import { BellIcon, PlusIcon, TrashIcon, EditIcon, PlayIcon } from '../components/icons/Icons';
-import { useToast } from '../hooks/useToast';
 import { useConfirm } from '../hooks/useConfirm';
+import { useApiQuery } from '../hooks/useApiQuery';
+import { useApiMutation } from '../hooks/useApiMutation';
+
+type ChannelType = 'DISCORD' | 'SLACK' | 'TELEGRAM';
 
 export const Notifications: React.FC = () => {
-  const toast = useToast();
   const confirm = useConfirm();
 
-  const [channels, setChannels] = useState<NotificationChannel[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: channels = [], isLoading: loading, refetch } = useApiQuery(
+    (signal) => notificationsApi.list(signal),
+    [],
+    { errorToast: 'Failed to load notification channels' }
+  );
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -22,30 +27,36 @@ export const Notifications: React.FC = () => {
 
   // Form states
   const [name, setName] = useState('');
-  const [channelType, setChannelType] = useState<'DISCORD' | 'SLACK' | 'TELEGRAM'>('DISCORD');
+  const [channelType, setChannelType] = useState<ChannelType>('DISCORD');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramChat, setTelegramChat] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
-  const fetchChannels = async () => {
-    try {
-      const res = await fn(`${API_URL}/notifications`);
-      if (res.ok) {
-        setChannels(await res.json());
-      } else {
-        toast.error('Failed to load notification channels');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    } finally {
-      setLoading(false);
+  const saveChannel = useApiMutation(
+    (id: number | null, body: ChannelInput) =>
+      id ? notificationsApi.update(id, body) : notificationsApi.create(body),
+    {
+      success: (_r, id) => (id ? 'Channel updated' : 'Channel registered'),
+      error: 'Failed to save channel',
+      onSuccess: () => {
+        setShowModal(false);
+        refetch();
+      },
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchChannels();
-  }, []);
+  const deleteChannel = useApiMutation((id: number) => notificationsApi.remove(id), {
+    success: 'Notification channel deleted',
+    error: 'Failed to delete notification channel',
+    onSuccess: () => {
+      refetch();
+    },
+  });
+
+  const testChannel = useApiMutation((id: number, _name: string) => notificationsApi.test(id), {
+    success: (_r, _id, channelName) => `Test alert sent to "${channelName}" successfully!`,
+    error: 'Failed to send test alert',
+  });
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -60,7 +71,7 @@ export const Notifications: React.FC = () => {
   const handleOpenEdit = (chan: NotificationChannel) => {
     setEditingId(chan.id);
     setName(chan.name);
-    setChannelType(chan.channel_type as any);
+    setChannelType(chan.channel_type as ChannelType);
 
     let url = '';
     let token = '';
@@ -85,19 +96,8 @@ export const Notifications: React.FC = () => {
 
   const handleTest = async (id: number, channelName: string) => {
     setTestingId(id);
-    try {
-      const res = await fn(`${API_URL}/notifications/${id}/test`, { method: 'POST' });
-      if (res.ok) {
-        toast.success(`Test alert sent to "${channelName}" successfully!`);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(`Failed to send test: ${data.message || 'Check channel credentials'}`);
-      }
-    } catch (e) {
-      toast.error('Connection error while sending test');
-    } finally {
-      setTestingId(null);
-    }
+    await testChannel.mutate(id, channelName);
+    setTestingId(null);
   };
 
   const handleDelete = async (id: number, channelName: string) => {
@@ -107,62 +107,23 @@ export const Notifications: React.FC = () => {
       confirmText: 'Delete Channel',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/notifications/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('Notification channel deleted');
-        fetchChannels();
-      } else {
-        toast.error('Failed to delete notification channel');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    }
+    if (confirmed) await deleteChannel.mutate(id);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      const config: any = {};
-      if (channelType === 'DISCORD' || channelType === 'SLACK') {
-        config.url = webhookUrl.trim();
-      } else if (channelType === 'TELEGRAM') {
-        config.bot_token = telegramToken.trim();
-        config.chat_id = telegramChat.trim();
-      }
-
-      const url = editingId ? `${API_URL}/notifications/${editingId}` : `${API_URL}/notifications`;
-      const method = editingId ? 'PUT' : 'POST';
-
-      const payload = {
-        name: name.trim(),
-        channel_type: channelType,
-        config_json: JSON.stringify(config),
-      };
-
-      const res = await fn(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingId ? 'Channel updated' : 'Channel registered');
-        setShowModal(false);
-        fetchChannels();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.message || 'Failed to save channel');
-      }
-    } catch (e) {
-      toast.error('Connection error while saving channel');
-    } finally {
-      setSubmitting(false);
+    const config: Record<string, string> = {};
+    if (channelType === 'DISCORD' || channelType === 'SLACK') {
+      config.url = webhookUrl.trim();
+    } else if (channelType === 'TELEGRAM') {
+      config.bot_token = telegramToken.trim();
+      config.chat_id = telegramChat.trim();
     }
+    await saveChannel.mutate(editingId, {
+      name: name.trim(),
+      channel_type: channelType,
+      config_json: JSON.stringify(config),
+    });
   };
 
   return (
@@ -191,7 +152,7 @@ export const Notifications: React.FC = () => {
       ) : (
         <div className="grid-2">
           {channels.map((c) => (
-            <div key={c.id} className="glass-panel" style={{ padding: '24px' }}>
+            <div key={c.id} className="glass-panel panel-pad">
               <div className="flex-between" style={{ marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div
@@ -240,7 +201,7 @@ export const Notifications: React.FC = () => {
               </div>
 
               <div className="flex-between" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-subtle)' }}>
-                <span className="text-sm" style={{ color: 'var(--text-faint)' }}>
+                <span className="text-sm text-faint">
                   Active alerting integration
                 </span>
 
@@ -269,7 +230,7 @@ export const Notifications: React.FC = () => {
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleSubmit}>
+            <Button variant="primary" loading={saveChannel.isPending} onClick={handleSubmit}>
               {editingId ? 'Save Changes' : 'Create Channel'}
             </Button>
           </>
@@ -293,7 +254,7 @@ export const Notifications: React.FC = () => {
             <select
               className="form-select"
               value={channelType}
-              onChange={(e) => setChannelType(e.target.value as any)}
+              onChange={(e) => setChannelType(e.target.value as ChannelType)}
             >
               <option value="DISCORD">Discord Webhook</option>
               <option value="SLACK">Slack Incoming Webhook</option>

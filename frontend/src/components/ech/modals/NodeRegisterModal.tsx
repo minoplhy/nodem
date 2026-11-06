@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../../core';
-import type { ECHCluster } from '../../../core';
+import { ech } from '../../../api/endpoints';
+import type { ECHCluster, ECHNodeInput } from '../../../api/types';
 import { Modal } from '../../ui/Modal';
 import { Button } from '../../ui/Button';
-import { useToast } from '../../../hooks/useToast';
+import { useApiMutation } from '../../../hooks/useApiMutation';
 
 interface NodeRegisterModalProps {
   open: boolean;
@@ -20,14 +20,21 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const toast = useToast();
-
   const [nodeName, setNodeName] = useState('');
   const [pullTransport, setPullTransport] = useState<'HTTPS' | 'SSH'>('HTTPS');
   const [sshPublicKey, setSshPublicKey] = useState('');
   const [proxyType, setProxyType] = useState<'nginx' | 'caddy' | 'haproxy' | 'hook'>('nginx');
   const [selectedClusterIds, setSelectedClusterIds] = useState<number[]>([]);
-  const [submitting, setSubmitting] = useState(false);
+
+  const registerNode = useApiMutation((body: ECHNodeInput) => ech.nodes.create(body), {
+    // HTTPS nodes get the token-reveal dialog instead of a toast.
+    success: (data) => (data?.agent_token ? '' : 'SSH Node registered successfully'),
+    error: 'Error registering node',
+    onSuccess: (data, body) => {
+      onClose();
+      onSuccess(body.name, data?.agent_token || undefined, body.proxy_type, data?.server_public_key);
+    },
+  });
 
   useEffect(() => {
     if (open) {
@@ -41,43 +48,16 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      const payload: any = {
-        name: nodeName.trim(),
-        pull_transport: pullTransport,
-        proxy_type: proxyType,
-        cluster_ids: selectedClusterIds,
-      };
-      if (pullTransport === 'SSH') {
-        payload.ssh_public_key = sshPublicKey.trim();
-      }
-
-      const res = await fn(`${API_URL}/ech/nodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        onClose();
-        if (data.agent_token) {
-          onSuccess(nodeName.trim(), data.agent_token, proxyType, data.server_public_key);
-        } else {
-          toast.success('SSH Node registered successfully');
-          onSuccess(nodeName.trim(), undefined, proxyType, data.server_public_key);
-        }
-      } else {
-        const err = await res.text();
-        toast.error(`Error registering node: ${err}`);
-      }
-    } catch {
-      toast.error('Failed to register node');
-    } finally {
-      setSubmitting(false);
+    const payload: ECHNodeInput = {
+      name: nodeName.trim(),
+      pull_transport: pullTransport,
+      proxy_type: proxyType,
+      cluster_ids: selectedClusterIds,
+    };
+    if (pullTransport === 'SSH') {
+      payload.ssh_public_key = sshPublicKey.trim();
     }
+    await registerNode.mutate(payload);
   };
 
   return (
@@ -100,7 +80,7 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
           <select
             className="form-input"
             value={pullTransport}
-            onChange={(e) => setPullTransport(e.target.value as any)}
+            onChange={(e) => setPullTransport(e.target.value as 'HTTPS' | 'SSH')}
           >
             <option value="HTTPS">HTTPS (Authenticated via X-Agent-Token header)</option>
             <option value="SSH">SSH (Direct session via SSH Port 34234)</option>
@@ -132,7 +112,7 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
           <select
             className="form-input"
             value={proxyType}
-            onChange={(e) => setProxyType(e.target.value as any)}
+            onChange={(e) => setProxyType(e.target.value as typeof proxyType)}
           >
             <option value="nginx">Nginx (stages ech_includes.conf & ssl_ech_key)</option>
             <option value="caddy">Caddy (stages caddy ech pem & reloads)</option>
@@ -180,7 +160,7 @@ export const NodeRegisterModal: React.FC<NodeRegisterModalProps> = ({
           <Button variant="secondary" type="button" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" type="submit" loading={submitting}>
+          <Button variant="primary" type="submit" loading={registerNode.isPending}>
             Register Node
           </Button>
         </div>

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../../core';
-import type { ECHCluster, ECHNode } from '../../../core';
+import { ech } from '../../../api/endpoints';
+import type { ECHCluster, ECHNode } from '../../../api/types';
 import { Modal } from '../../ui/Modal';
 import { Button } from '../../ui/Button';
-import { useToast } from '../../../hooks/useToast';
+import { useApiMutation } from '../../../hooks/useApiMutation';
 
 interface AssignNodeModalProps {
   open: boolean;
@@ -20,42 +20,30 @@ export const AssignNodeModal: React.FC<AssignNodeModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const toast = useToast();
-
   const [assigningNodeId, setAssigningNodeId] = useState<number | ''>('');
-  const [submitting, setSubmitting] = useState(false);
 
+  const assignNode = useApiMutation((clusterId: number, nodeId: number) => ech.clusters.assignNode(clusterId, nodeId), {
+    success: 'Node assigned to cluster',
+    error: 'Failed to assign node',
+    onSuccess: () => {
+      onClose();
+      onSuccess();
+    },
+  });
+
+  // Reset the selection only when the dialog opens. (Depending on
+  // `availableNodes` would reset it on every background poll.)
   useEffect(() => {
     if (open) {
       setAssigningNodeId(availableNodes.length > 0 ? availableNodes[0].id : '');
     }
-  }, [open, availableNodes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cluster || !assigningNodeId) return;
-    setSubmitting(true);
-
-    try {
-      const res = await fn(`${API_URL}/ech/clusters/${cluster.id}/nodes/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ node_id: Number(assigningNodeId) }),
-      });
-
-      if (res.ok) {
-        toast.success('Node assigned to cluster');
-        onClose();
-        onSuccess();
-      } else {
-        const err = await res.text();
-        toast.error(`Failed to assign node: ${err}`);
-      }
-    } catch {
-      toast.error('Network error assigning node');
-    } finally {
-      setSubmitting(false);
-    }
+    await assignNode.mutate(cluster.id, Number(assigningNodeId));
   };
 
   return (
@@ -95,7 +83,7 @@ export const AssignNodeModal: React.FC<AssignNodeModalProps> = ({
           <Button
             variant="primary"
             type="submit"
-            loading={submitting}
+            loading={assignNode.isPending}
             disabled={!assigningNodeId}
           >
             Assign to Cluster

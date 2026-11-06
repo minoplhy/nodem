@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ECHDomain, DnsProviderConfig, TargetGroup } from '../../core';
+import type { ECHDomain, DnsProviderConfig, TargetGroup } from '../../api/types';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
 import { GlobeIcon, PlusIcon, InfoIcon, TrashIcon } from '../icons/Icons';

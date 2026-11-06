@@ -26,7 +26,7 @@ func (s *AppState) ListChecks(w http.ResponseWriter, r *http.Request) {
 		RespondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	RespondJSON(w, http.StatusOK, checks)
+	RespondList(w, http.StatusOK, checks)
 }
 
 func (s *AppState) AddCheck(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { fn, API_URL } from '../../core';
-import type { TargetGroup, TestCheckResult } from '../../core';
+import { groups as groupsApi } from '../../api/endpoints';
+import { errorMessage } from '../../api/client';
+import type { TargetGroup, TestCheckResult } from '../../api/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { PlayIcon, CheckIcon, XIcon } from '../icons/Icons';
@@ -22,20 +23,9 @@ export const GroupTesting: React.FC<GroupTestingProps> = ({ activeGroup }) => {
     setShowModal(true);
 
     try {
-      const res = await fn(`${API_URL}/groups/${activeGroup.id}/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (res.ok) {
-        const data: TestCheckResult[] = await res.json();
-        setResults(data);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.message || 'Config test suite failed to execute');
-      }
+      setResults(await groupsApi.test(activeGroup.id));
     } catch (e) {
-      toast.error('Connection error while executing test runner');
+      toast.error(errorMessage(e, 'Config test suite failed to execute'));
     } finally {
       setTesting(false);
     }

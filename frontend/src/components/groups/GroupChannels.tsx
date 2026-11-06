@@ -1,59 +1,69 @@
-import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../../core';
-import type { NotificationChannel, GroupNotificationSubscription } from '../../core';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { groups as groupsApi, notifications as notificationsApi } from '../../api/endpoints';
+import type { GroupNotificationSubscription } from '../../api/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { PlusIcon, TrashIcon } from '../icons/Icons';
 import { useToast } from '../../hooks/useToast';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useApiQuery } from '../../hooks/useApiQuery';
+import { useApiMutation } from '../../hooks/useApiMutation';
 
 interface GroupChannelsProps {
   groupId: number;
   groupSubscriptions: GroupNotificationSubscription[];
   onRefresh: () => void;
-  onNavigateToTab?: (tab: string) => void;
 }
 
 export const GroupChannels: React.FC<GroupChannelsProps> = ({
   groupId,
   groupSubscriptions,
   onRefresh,
-  onNavigateToTab,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
 
+  const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
-  const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState('');
   const [notifyOnUp, setNotifyOnUp] = useState(true);
   const [notifyOnDown, setNotifyOnDown] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
 
-  const fetchAvailableChannels = async () => {
-    try {
-      const res = await fn(`${API_URL}/notifications`);
-      if (res.ok) {
-        const list: NotificationChannel[] = await res.json();
-        setChannels(list);
-        if (list.length > 0) {
-          setSelectedChannelId(String(list[0].id));
-        }
-      }
-    } catch (e) {
-      console.error(e);
+  const channelsQuery = useApiQuery((signal) => notificationsApi.list(signal), []);
+  const channels = channelsQuery.data ?? [];
+
+  const linkChannel = useApiMutation(
+    (body: { channel_id: number; notify_on_up: boolean; notify_on_down: boolean }) =>
+      groupsApi.linkChannel(groupId, body),
+    {
+      success: 'Channel linked to target group',
+      error: 'Failed to link notification channel',
+      onSuccess: () => {
+        setShowModal(false);
+        onRefresh();
+      },
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchAvailableChannels();
-  }, []);
+  const unlinkChannel = useApiMutation((channelId: number) => groupsApi.unlinkChannel(groupId, channelId), {
+    success: 'Notification channel unlinked',
+    error: 'Failed to unlink channel',
+    onSuccess: onRefresh,
+  });
 
-  const handleOpenAdd = () => {
-    fetchAvailableChannels();
+  const handleOpenAdd = async () => {
     setNotifyOnUp(true);
     setNotifyOnDown(true);
+    setSelectedChannelId(channels.length > 0 ? String(channels[0].id) : '');
     setShowModal(true);
+    // Pick up channels created since this tab was opened.
+    const fresh = await channelsQuery.refetch();
+    if (fresh) {
+      setSelectedChannelId((cur) =>
+        cur && fresh.some((c) => String(c.id) === cur) ? cur : fresh.length > 0 ? String(fresh[0].id) : ''
+      );
+    }
   };
 
   const handleLinkSubmit = async (e: React.FormEvent) => {
@@ -62,32 +72,11 @@ export const GroupChannels: React.FC<GroupChannelsProps> = ({
       toast.error('Please select a notification channel');
       return;
     }
-
-    setSubmitting(true);
-    try {
-      const res = await fn(`${API_URL}/groups/${groupId}/notifications`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          channel_id: parseInt(selectedChannelId, 10),
-          notify_on_up: notifyOnUp,
-          notify_on_down: notifyOnDown,
-        }),
-      });
-
-      if (res.ok) {
-        toast.success('Channel linked to target group');
-        setShowModal(false);
-        onRefresh();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to link notification channel');
-      }
-    } catch (e) {
-      toast.error('Connection error while linking channel');
-    } finally {
-      setSubmitting(false);
-    }
+    await linkChannel.mutate({
+      channel_id: parseInt(selectedChannelId, 10),
+      notify_on_up: notifyOnUp,
+      notify_on_down: notifyOnDown,
+    });
   };
 
   const handleUnlink = async (channelId: number) => {
@@ -97,31 +86,17 @@ export const GroupChannels: React.FC<GroupChannelsProps> = ({
       confirmText: 'Unlink',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/groups/${groupId}/notifications/${channelId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        toast.success('Notification channel unlinked');
-        onRefresh();
-      } else {
-        toast.error('Failed to unlink channel');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    }
+    if (confirmed) await unlinkChannel.mutate(channelId);
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '24px' }}>
+    <div className="glass-panel panel-pad">
       <div className="flex-between" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <h3 className="font-title" style={{ fontSize: '1.2rem', fontWeight: 700 }}>
             Notification Channels
           </h3>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Destinations dispatched when failover or recovery occurs.
           </p>
         </div>
@@ -196,7 +171,7 @@ export const GroupChannels: React.FC<GroupChannelsProps> = ({
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleLinkSubmit}>
+            <Button variant="primary" loading={linkChannel.isPending} onClick={handleLinkSubmit}>
               Link Channel
             </Button>
           </>
@@ -206,19 +181,16 @@ export const GroupChannels: React.FC<GroupChannelsProps> = ({
           {channels.length === 0 ? (
             <div className="text-sm" style={{ color: 'var(--warn)', marginBottom: '16px' }}>
               No global notification channels found.{' '}
-              {onNavigateToTab && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  style={{ textDecoration: 'underline', color: 'var(--primary)' }}
-                  onClick={() => {
-                    setShowModal(false);
-                    onNavigateToTab('notifications');
-                  }}
-                >
-                  Configure Notifications &rarr;
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs link-button"
+                onClick={() => {
+                  setShowModal(false);
+                  navigate('/notifications');
+                }}
+              >
+                Configure Notifications &rarr;
+              </button>
             </div>
           ) : (
             <div className="form-group">

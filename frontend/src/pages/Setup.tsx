@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fn, API_URL } from '../core';
+import { auth } from '../api/endpoints';
+import { ApiError, NETWORK_ERROR_MESSAGE } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { KeyIcon } from '../components/icons/Icons';
 import { useToast } from '../hooks/useToast';
@@ -40,26 +41,16 @@ export const Setup: React.FC<SetupProps> = ({ onSetupSuccess }) => {
     setLoading(true);
 
     try {
-      const res = await fn(`${API_URL}/setup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: token.trim(),
-          username: username.trim(),
-          password,
-        }),
-      });
-
-      if (res.ok) {
-        toast.success('Admin user registered successfully! Please log in.');
-        onSetupSuccess();
-        navigate('/login');
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.message || 'Setup registration failed. Invalid bootstrap token?');
-      }
+      await auth.setup({ token: token.trim(), username: username.trim(), password });
+      toast.success('Admin user registered successfully! Please log in.');
+      onSetupSuccess();
+      navigate('/login');
     } catch (err) {
-      setError('Connection refused while connecting to backend');
+      if (err instanceof ApiError && err.status !== 0) {
+        setError(err.serverMessage || 'Setup registration failed. Invalid bootstrap token?');
+      } else {
+        setError(NETWORK_ERROR_MESSAGE);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,7 +79,7 @@ export const Setup: React.FC<SetupProps> = ({ onSetupSuccess }) => {
           <h1 className="font-title" style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '6px' }}>
             INITIAL SETUP
           </h1>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="text-sm text-muted">
             Register the primary administrator account for this Node Monitor instance
           </p>
         </div>

@@ -1,50 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { fn, API_URL } from '../core';
-import type { DnsProviderConfig } from '../core';
+import React, { useState } from 'react';
+import { providers as providersApi } from '../api/endpoints';
+import type { DnsProviderConfig, ProviderInput } from '../api/types';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
 import { GlobeIcon, PlusIcon, TrashIcon, EditIcon } from '../components/icons/Icons';
-import { useToast } from '../hooks/useToast';
 import { useConfirm } from '../hooks/useConfirm';
+import { useApiQuery } from '../hooks/useApiQuery';
+import { useApiMutation } from '../hooks/useApiMutation';
+
+type ProviderType = 'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook';
 
 export const Providers: React.FC = () => {
-  const toast = useToast();
   const confirm = useConfirm();
 
-  const [providers, setProviders] = useState<DnsProviderConfig[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: providers = [], isLoading: loading, refetch } = useApiQuery(
+    (signal) => providersApi.list(signal),
+    [],
+    { errorToast: 'Failed to load DNS providers' }
+  );
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
   // Form states
   const [name, setName] = useState('');
-  const [providerType, setProviderType] = useState<'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook'>('Cloudflare');
+  const [providerType, setProviderType] = useState<ProviderType>('Cloudflare');
   const [apiUrl, setApiUrl] = useState('https://api.cloudflare.com');
   const [token, setToken] = useState('');
   const [zone, setZone] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
-  const fetchProviders = async () => {
-    try {
-      const res = await fn(`${API_URL}/providers`);
-      if (res.ok) {
-        setProviders(await res.json());
-      } else {
-        toast.error('Failed to load DNS providers');
-      }
-    } catch (e) {
-      toast.error('Connection error while fetching providers');
-    } finally {
-      setLoading(false);
+  const saveProvider = useApiMutation(
+    (id: number | null, body: ProviderInput) => (id ? providersApi.update(id, body) : providersApi.create(body)),
+    {
+      success: (_r, id) => (id ? 'DNS provider updated' : 'DNS provider registered'),
+      error: 'Failed to save DNS provider',
+      onSuccess: () => {
+        setShowModal(false);
+        refetch();
+      },
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchProviders();
-  }, []);
+  const deleteProvider = useApiMutation((id: number) => providersApi.remove(id), {
+    success: 'DNS provider deleted',
+    error: 'Failed to delete DNS provider',
+    onSuccess: () => {
+      refetch();
+    },
+  });
 
   const handleOpenAdd = () => {
     setEditingId(null);
@@ -59,14 +64,14 @@ export const Providers: React.FC = () => {
   const handleOpenEdit = (p: DnsProviderConfig) => {
     setEditingId(p.id);
     setName(p.name);
-    setProviderType(p.provider_type as any);
+    setProviderType(p.provider_type as ProviderType);
     setApiUrl(p.api_url);
     setToken(p.token);
     setZone(p.zone);
     setShowModal(true);
   };
 
-  const handleTypeChange = (t: 'Cloudflare' | 'Technitium' | 'deSEC' | 'Hook') => {
+  const handleTypeChange = (t: ProviderType) => {
     setProviderType(t);
     if (t === 'Cloudflare') {
       setApiUrl('https://api.cloudflare.com');
@@ -83,39 +88,13 @@ export const Providers: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      const url = editingId ? `${API_URL}/providers/${editingId}` : `${API_URL}/providers`;
-      const method = editingId ? 'PUT' : 'POST';
-
-      const payload = {
-        name,
-        provider_type: providerType,
-        api_url: apiUrl.trim(),
-        token: token.trim(),
-        zone: zone.trim(),
-      };
-
-      const res = await fn(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        toast.success(editingId ? 'DNS provider updated' : 'DNS provider registered');
-        setShowModal(false);
-        fetchProviders();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.message || 'Failed to save DNS provider');
-      }
-    } catch (e) {
-      toast.error('Connection error while saving provider');
-    } finally {
-      setSubmitting(false);
-    }
+    await saveProvider.mutate(editingId, {
+      name,
+      provider_type: providerType,
+      api_url: apiUrl.trim(),
+      token: token.trim(),
+      zone: zone.trim(),
+    });
   };
 
   const handleDelete = async (pId: number, pName: string) => {
@@ -125,19 +104,7 @@ export const Providers: React.FC = () => {
       confirmText: 'Delete Provider',
       danger: true,
     });
-    if (!confirmed) return;
-
-    try {
-      const res = await fn(`${API_URL}/providers/${pId}`, { method: 'DELETE' });
-      if (res.ok) {
-        toast.success('DNS provider deleted');
-        fetchProviders();
-      } else {
-        toast.error('Failed to delete DNS provider');
-      }
-    } catch (e) {
-      toast.error('Connection error');
-    }
+    if (confirmed) await deleteProvider.mutate(pId);
   };
 
   return (
@@ -166,7 +133,7 @@ export const Providers: React.FC = () => {
       ) : (
         <div className="grid-2">
           {providers.map((p) => (
-            <div key={p.id} className="glass-panel" style={{ padding: '24px' }}>
+            <div key={p.id} className="glass-panel panel-pad">
               <div className="flex-between" style={{ marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div
@@ -221,7 +188,7 @@ export const Providers: React.FC = () => {
                 </div>
                 <div className="flex-between">
                   <span style={{ color: 'var(--text-muted)' }}>API Endpoint:</span>
-                  <span className="font-mono text-sm" style={{ color: 'var(--text-faint)' }}>
+                  <span className="font-mono text-sm text-faint">
                     {p.api_url}
                   </span>
                 </div>
@@ -245,7 +212,7 @@ export const Providers: React.FC = () => {
             <Button variant="secondary" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={submitting} onClick={handleSubmit}>
+            <Button variant="primary" loading={saveProvider.isPending} onClick={handleSubmit}>
               {editingId ? 'Save Changes' : 'Add Provider'}
             </Button>
           </>
@@ -270,7 +237,7 @@ export const Providers: React.FC = () => {
               <select
                 className="form-select"
                 value={providerType}
-                onChange={(e) => handleTypeChange(e.target.value as any)}
+                onChange={(e) => handleTypeChange(e.target.value as ProviderType)}
               >
                 <option value="Cloudflare">Cloudflare DNS</option>
                 <option value="Technitium">Technitium DNS Server</option>
